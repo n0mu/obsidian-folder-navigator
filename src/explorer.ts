@@ -45,21 +45,22 @@ export class FolderRevealer {
         const generation = ++this.generation;
         this.clearHighlight();
         try {
-            const leaf =
-                this.app.workspace.getLeavesOfType(EXPLORER_VIEW_TYPE)[0];
-            if (!leaf) {
-                new Notice(
-                    "Folder Navigator: open the file explorer (Files core plugin) to reveal folders.",
-                );
-                return;
+            // With the Files core plugin disabled, an explorer leaf can remain
+            // with a placeholder view, so take the first one that can reveal.
+            let view: RevealableView | null = null;
+            for (const leaf of this.app.workspace.getLeavesOfType(
+                EXPLORER_VIEW_TYPE,
+            )) {
+                await this.app.workspace.revealLeaf(leaf); // also loads a deferred view
+                if (generation !== this.generation) return;
+                if (canReveal(leaf.view)) {
+                    view = leaf.view;
+                    break;
+                }
             }
-            await this.app.workspace.revealLeaf(leaf); // also loads a deferred view
-            if (generation !== this.generation) return;
-
-            const { view } = leaf;
-            if (!canReveal(view)) {
+            if (!view) {
                 new Notice(
-                    "Folder Navigator: this version of the file explorer can't reveal folders.",
+                    "Folder Navigator: the file explorer isn't available. Enable the Files core plugin and open the file explorer, then try again.",
                 );
                 return;
             }

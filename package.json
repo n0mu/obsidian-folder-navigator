@@ -11,10 +11,11 @@
     "scripts": {
         "dev": "node esbuild.config.mjs",
         "build": "npm run typecheck && node esbuild.config.mjs production",
-        "typecheck": "tsc --noEmit && tsc --noEmit -p test",
+        "typecheck": "tsc --noEmit && tsc --noEmit -p test && tsc --noEmit -p e2e",
         "lint": "eslint .",
-        "format": "prettier -w \"src/**/*.ts\" \"test/**/*.ts\"",
+        "format": "prettier -w \"src/**/*.ts\" \"test/**/*.ts\" \"e2e/**/*.ts\"",
         "test": "node --test \"test/**/*.test.ts\"",
+        "test:e2e": "npm run build && node --test --test-concurrency=1 \"e2e/**/*.e2e.ts\"",
         "preversion": "npm run lint && npm run test && npm run build",
         "version": "node version-bump.mjs && node version-changelog.mjs && git add manifest.json versions.json CHANGELOG.md",
         "postversion": "git push && git push --tags"

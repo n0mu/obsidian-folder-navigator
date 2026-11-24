@@ -22,11 +22,18 @@ export default defineConfig([
         },
     },
     {
-        // Unit tests run under Node's built-in runner, not inside Obsidian.
-        files: ["test/**/*.ts"],
+        // Unit and e2e tests run under Node's built-in runner, not inside Obsidian.
+        files: ["test/**/*.ts", "e2e/**/*.ts"],
         rules: {
             "@typescript-eslint/no-floating-promises": "off", // node:test's test() returns a promise the runner tracks
             "obsidianmd/no-nodejs-modules": "off",
+        },
+    },
+    {
+        // The e2e harness is a Node program talking to the local DevTools port.
+        files: ["e2e/**/*.ts"],
+        rules: {
+            "no-restricted-globals": "off", // fetch() to 127.0.0.1, not plugin network access
         },
     },
 ]);
