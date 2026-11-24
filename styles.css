@@ -41,3 +41,11 @@
 .folder-navigator-modal .fn-separator-item {
     cursor: default;
 }
+
+/* Slider value label, shown only on Obsidian below 1.13 (newer sliders show it inline). */
+.fn-slider-value {
+    min-width: 2.5ch;
+    margin-left: 8px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}

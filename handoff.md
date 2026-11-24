@@ -114,6 +114,7 @@ Target devDependencies after S1: `esbuild`, `eslint`, `eslint-plugin-obsidianmd`
   - (b) Keep the ID and upstream the fixes as PRs. Then leave the manifest identity alone and split S1–S6 into upstreamable PRs.
   - Settle this before S6. S1–S5 don't depend on it.
 - **D2. `minAppVersion`.** (a) *Recommended:* **1.7.2**. It covers `getAllFolders` and Promise-returning `revealLeaf`, and loses nobody realistic. (b) **1.13.0** also unlocks `getSettingDefinitions()` and the built-in `SettingFolderControl` (folder picker with `includeRoot`), which deletes `FolderSelectionModal` and most of `settingsTab.ts`. Lint then warns `settings-tab/prefer-setting-definitions` unless you migrate. Choose (b) only if you're fine requiring 1.13+.
+  - *S5 update:* the commented-disable plan below doesn't work: `obsidianmd.configs.recommended` forbids disabling `no-deprecated` and `prefer-setting-definitions` (`eslint-comments/no-restricted-disable`). S5 stays on 1.7.2 by implementing both paths, guarded with `requireApiVersion("1.13.0")`; see the S5 log.
   - *S1 update:* the baseline also flags `setDynamicTooltip` (×3) and `setWarning` as deprecated (`@typescript-eslint/no-deprecated`). The replacement, `setDestructive()`, is `@since 1.13.0`. With (a), S5 keeps both calls and adds an `eslint-disable-next-line` comment explaining the minAppVersion. With (b), they're replaced cleanly.
 - **D3. Debug mode.** *Recommended:* remove the setting and its logs (stale `debugMode` keys in `data.json` are ignored by `parseSettings`). The alternative is to keep it with `console.debug` only.
 - **D4. Expand-target behaviour.** `revealInFolder` already expands ancestors. `expandTargetFolder` additionally opens the target so its children show. Keep it as is (recommended).
@@ -144,7 +145,7 @@ Files: `package.json`, `package-lock.json`, `.npmrc`, `esbuild.config.mjs`, `tsc
   ```
   Run eslint from the repo root (the config also lints `manifest.json`, `package.json`, `LICENSE`).
 - [x] **Paste the `npx eslint .` baseline into the Session log** for S2–S5. Don't fix src yet.
-- [ ] Accept: `npm run build` produces `build/main.js` that **loads in Obsidian and behaves identically** (manual check still pending, see the S1 log); `npm audit` 0 ✅; 310 packages (the original ~200 target wasn't realistic, because `eslint-plugin-obsidianmd` alone pulls in ~250).
+- [x] Accept: `npm run build` produces `build/main.js` that **loads in Obsidian and behaves identically** (verified by `npm run test:e2e`, including an old-vs-new comparison; see the E2E log); `npm audit` 0 ✅; 310 packages (the original ~200 target wasn't realistic, because `eslint-plugin-obsidianmd` alone pulls in ~250).
 
 ### S2: Correctness and safety fixes in place
 
@@ -158,7 +159,7 @@ Files: `manifest.json`, `versions.json`, `src/main.ts`, `src/settings.ts`, `src/
 - [x] QUAL-2: modal promises (`saveSettings` via `plugin.persistSettings()`, `handleCreateFolder`, `revealLeaf` now awaited). The settings-tab ones (ST:226, 252) remain for S5.
 - [x] QUAL-5: no change needed. `commands/no-plugin-id-in-command-id` doesn't fire on `open-folder-navigator` (S1 baseline).
 - [x] SEC-8: the modal gets the `folder-navigator-modal` class; all rules are scoped under it; classes are renamed `fn-separator`, `fn-create-*`, and `fn-highlighted` (the explorer highlight).
-- [ ] Accept: S2 lint errors are gone ✅ (97 → 80, see log). Manual checks 1–6 in §6 are **pending: not run in a real vault yet**.
+- [x] Accept: S2 lint errors are gone ✅ (97 → 80, see log). §6 checks 1–6 pass in `npm run test:e2e`.
 
 ### S3: Extract and test search; typed suggestion items
 
@@ -167,7 +168,7 @@ Files: new `src/search.ts`, `test/search.test.ts`, `src/folderSuggestModal.ts`.
 - [x] **First** write characterization tests against the current scoring/dedupe behaviour (copy the logic into `search.ts` verbatim, test it, *then* refactor). Cover: out-of-order keywords (`"bar foo"` matches `foo/bar/baz`), exact-name ranking, parent-over-child dedupe, child kept when it has more occurrences, create-option suppressed on exact path/name match, case-insensitivity. (`validateFolderName`, `parseSettings` and history already have tests, written in S2.)
 - [x] `enum FolderDisplayMode` → `as const` object + union type. Done early in S2 so `settings.ts` could be tested.
 - [x] Move to `SuggestModal<Item>` with the discriminated union (QUAL-3); separators only in the empty-query list (QUAL-7); unify recency/frequency; `renderMatches` with merged ranges.
-- [ ] Accept: `npm test` green ✅ (39 tests); `no-tfile-tfolder-cast` gone ✅; identical ordering for the same queries: pinned by score tests, but the **spot-check against the old build in a test vault is pending**.
+- [x] Accept: `npm test` green ✅ (39 tests); `no-tfile-tfolder-cast` gone ✅; identical ordering for the same queries ✅ (the e2e suite builds v0.5.0 from git and compares lists in Obsidian; the only difference is the SEC-3 fix).
 
 ### S4: Navigation and file explorer rewrite
 
@@ -176,17 +177,17 @@ Files: new `src/explorer.ts`, `src/folderSuggestModal.ts`.
 - [x] SEC-4: one guarded accessor for the explorer leaf + `revealInFolder`; no prototype enumeration; Notice when the explorer is unavailable (e.g. core plugin disabled).
 - [x] SEC-5: path-based selector scoped to the explorer leaf `containerEl`; drop ancestor click chain; expand target only (`is-collapsed` check) per `expandTargetFolder`.
 - [x] SEC-9/10: remove debug mode + `log()`; window timers; clear the highlight timer handle.
-- [ ] Test duplicate folder names (`A/notes`, `B/notes`), deep nesting, explorer closed/collapsed sidebar, mobile (drawer), and a popout window. **Pending: needs a real vault.**
-- [ ] Accept: `prefer-active-doc`, `prefer-window-timers` warnings gone ✅ (all folderSuggestModal/explorer lint is gone); §6 checks 1–4, 7 pass (**pending**).
+- [x] Test duplicate folder names (`A/notes`, `B/notes`), deep nesting, explorer closed/collapsed sidebar, mobile (drawer), and a popout window. All automated in `e2e/`.
+- [x] Accept: `prefer-active-doc`, `prefer-window-timers` warnings gone ✅; §6 checks 1–4, 7 pass ✅.
 
 ### S5: Settings tab and main cleanup
 
 Files: `src/settingsTab.ts`, `src/main.ts`.
 
-- [ ] QUAL-1: conditional rendering instead of `style.display`; re-render on mode change (`this.display()`).
-- [ ] If D2 = 1.13: migrate to `getSettingDefinitions()` + `SettingFolderControl`, delete `FolderSelectionModal`. Otherwise keep the modal but drop its unused `plugin` param and use `getAllFolders(true)` so root is selectable.
+- [x] QUAL-1: conditional rendering instead of `style.display`; re-render on mode change (`update()` on 1.13+, `display()` below).
+- [x] If D2 = 1.13: migrate to `getSettingDefinitions()` + `SettingFolderControl`, delete `FolderSelectionModal`. Otherwise keep the modal but drop its unused `plugin` param and use `getAllFolders(true)` so root is selectable.
 - [x] Remove debug toggle (D3), done in S4. Headings via `setHeading()` (already), sentence case text.
-- [ ] Accept: `npx eslint .` → **0 errors, 0 warnings** (deliberate disables commented). `npm run typecheck` clean.
+- [x] Accept: `npx eslint .` → **0 errors, 0 warnings**, with **no** disables (the recommended config forbids disabling these rules; see the S5 log). `npm run typecheck` clean.
 
 ### S6: Release pipeline, metadata, docs
 
@@ -199,7 +200,9 @@ Files: `.github/workflows/*`, `.github/dependabot.yml`, `.github/FUNDING.yml`, `
 
 ---
 
-## 6. Manual test checklist (run in a throwaway vault after S2, S4, S5)
+## 6. Test checklist (automated: `npm run test:e2e`)
+
+Every item below is covered by `e2e/plugin.e2e.ts`. The suite runs in a separate Obsidian instance with a temporary vault and profile, takes about 12 s, and needs Obsidian installed (`OBSIDIAN_BIN` overrides the path). Only Obsidian 1.15.1 (the installed version) has been tested; `minAppVersion` 1.7.2 itself has not.
 
 1. Empty query lists folders; in recency/frequency mode the pinned block + separators show and are not selectable.
 2. `bar foo` finds `foo/bar/baz`; parent `abc` hides `abc/x` children without extra matches.
@@ -334,3 +337,38 @@ Files: `.github/workflows/*`, `.github/dependabot.yml`, `.github/FUNDING.yml`, `
   - Rapid repeated navigation: the highlight should move, not stack.
 - Left for S6: `docs/implementation/SEARCH_IMPROVEMENTS.md` still describes debug logging.
 - Next: S5.
+
+### E2E - 2026-11-24 - branch `hardening`, commit `0862803`
+- Automated every pending manual check (§6 1–8 and the S1–S4 leftovers) as `npm run test:e2e`. **32 tests, all passing**; three consecutive runs were stable, each about 12 s.
+- How it works (`e2e/`, no new dependencies):
+  - It launches the installed Obsidian with a temporary `--user-data-dir` and a temporary vault, so it's a separate instance. The user's own Obsidian and vaults are untouched, and it can run while Obsidian is open.
+  - It drives the app over the Chrome DevTools Protocol, using Node's built-in WebSocket and `fetch`.
+  - Input in the main window uses real CDP input events. Popout and settings windows use DOM events, because CDP input only reaches the main window.
+  - The vault's "Trust author and enable plugins" dialog is answered the way a user would answer it.
+  - `FN_E2E_KEEP=1` keeps the temporary vault for inspection.
+- The old-vs-new check builds v0.5.0 (`4175b9d`) from git with esbuild and runs it in the same vault. Searches and the default browse list are identical. The recency and frequency lists differ only by the SEC-3 fix: v0.5.0 pins a never-visited folder named `constructor`, because `history["constructor"]` returns `Object.prototype.constructor`.
+- Found and fixed:
+  - With the Files core plugin disabled, the explorer leaf stays open with a placeholder view. The plugin showed "this version of the file explorer can't reveal folders". It now uses the first leaf that can reveal, and otherwise shows "the file explorer isn't available. Enable the Files core plugin…".
+- Found, not ours:
+  - **A folder named `__proto__` breaks Obsidian itself** (checked with no plugins installed). The vault's file map is a plain object, so the folder replaces its prototype and the folder never appears. So `__proto__` is tested as a `data.json` history key, the way this plugin actually encounters it.
+- Facts learned about Obsidian 1.15.1 (they shaped the tests):
+  - Settings open in their **own window** (`app.setting.shouldUsePopout()`).
+  - Notices raised from settings appear in that window.
+  - Enabling a plugin while a dialog-triggered load is still in `onload` loads a **second** instance and leaks the first. This was a harness bug, now fixed. A test now checks that a reload leaves exactly one settings tab.
+- Not covered: Obsidian versions other than 1.15.1 (`minAppVersion` is 1.7.2), real mobile devices (only `app.emulateMobile`), and CI (runners don't have Obsidian; see S6).
+
+### S5 - 2026-11-24 - branch `hardening`
+- Done: QUAL-1, the misused promises, the deprecations and prefer-setting-definitions. **`npx eslint .` reports 0 problems, with no `eslint-disable` anywhere.** Typecheck is clean, 39 unit and 32 e2e tests pass, `npm audit` reports 0, and `build/main.js` is 15.0 kB (only `require("obsidian")`).
+- **Deviation from plan:** the plan said to keep `setDynamicTooltip` and `setWarning` behind commented `eslint-disable`s (D2 = 1.7.2). The recommended config **forbids** disabling `@typescript-eslint/no-deprecated` and `settings-tab/prefer-setting-definitions` (`eslint-comments/no-restricted-disable`), so the review would still flag them. Instead, the tab now supports both API generations without raising `minAppVersion`. I confirmed in the 1.15.1 bundle that `renderTab()` uses the declarative path whenever `getSettingDefinitions()` returns items and calls `display()` otherwise.
+  - Every setting is defined once, as a row `{ name, desc, visible?, render(setting) }` in a group.
+  - On 1.13+, `getSettingDefinitions()` maps the rows to groups of `SettingDefinitionRender` items. Obsidian renders them, re-evaluates `visible` on `update()`, and indexes them for settings search, which is what `prefer-setting-definitions` asks for.
+  - Below 1.13, `display()` renders the same rows. An e2e test checks that both paths list the same rows in each mode.
+  - Mode changes call `refresh()`, which is `update()` on 1.13+ and `display()` below, gated by `requireApiVersion("1.13.0")`. The `no-unsupported-api` rule accepts that guard.
+  - Sliders: `setDynamicTooltip()` is a no-op on 1.15, where the value shows inline. Below 1.13, a small `fn-slider-value` label shows the value instead.
+  - Reset button: 1.13+ uses `setDestructive().setCta()`, which is what `setWarning()` does there now. Below 1.13 it adds the `mod-warning` class, which is what `setWarning()` did there.
+- The folder picker no longer takes the unused `plugin` parameter, and it lists the vault root (`getAllFolders(true)`, shown as "/ (Root)", stored as `""`).
+- The confirm dialog is now a small `ConfirmResetModal` class.
+- All saves go through `plugin.persistSettings()`, which is fire-and-forget with error logging, so no async callbacks remain.
+- `main.ts` needed no changes.
+- Not verified: rendering on Obsidian below 1.13. The e2e test calls `display()` on 1.15, which proves the rows and visibility logic but uses 1.15's components.
+- Next: S6. Settle D1 (plugin identity) first. Running `test:e2e` in CI would need Obsidian downloaded on the runner plus xvfb on Linux; decide whether that's worth it, or keep e2e local and run it before each release.

@@ -1,41 +1,58 @@
 import {
-    App,
-    PluginSettingTab,
-    Setting,
-    DropdownComponent,
+    type App,
+    FuzzySuggestModal,
     Modal,
     Notice,
-    FuzzySuggestModal,
-    TFolder,
+    PluginSettingTab,
+    Setting,
+    type SettingDefinitionItem,
+    type TFolder,
+    requireApiVersion,
 } from "obsidian";
 import type FolderNavigatorPlugin from "./main";
 import { FolderDisplayMode } from "./settings";
 import { createHistory } from "./history";
 
-/**
- * Modal for searching and selecting a folder for new folder creation location
- */
-class FolderSelectionModal extends FuzzySuggestModal<TFolder> {
-    plugin: FolderNavigatorPlugin;
-    onSelect: (folder: TFolder) => void;
+const ROOT_LABEL = "/ (Root)";
 
-    constructor(
-        app: App,
-        plugin: FolderNavigatorPlugin,
-        onSelect: (folder: TFolder) => void,
-    ) {
+/**
+ * Obsidian 1.13 added declarative settings (searchable, rendered by the app)
+ * and changed sliders and buttons. minAppVersion is 1.7.2 (decision D2), so
+ * older versions get the classic `display()` path from the same rows.
+ */
+const DECLARATIVE_SETTINGS = "1.13.0";
+
+/** One settings row, rendered by either path. */
+interface Row {
+    name: string;
+    desc: string;
+    /** Re-evaluated on every render; hidden rows are skipped. */
+    visible?: () => boolean;
+    /** Add the row's controls. Name and description are already set. */
+    render: (setting: Setting) => void;
+}
+
+interface Group {
+    heading: string;
+    rows: Row[];
+}
+
+/** Pick the folder new folders are created in (the vault root included). */
+class FolderSelectionModal extends FuzzySuggestModal<TFolder> {
+    private onSelect: (folder: TFolder) => void;
+
+    constructor(app: App, onSelect: (folder: TFolder) => void) {
         super(app);
-        this.plugin = plugin;
         this.onSelect = onSelect;
         this.setPlaceholder("Search for a folder...");
     }
 
     getItems(): TFolder[] {
-        return this.app.vault.getAllFolders();
+        return this.app.vault.getAllFolders(true);
     }
 
     getItemText(folder: TFolder): string {
-        return folder.path || "/";
+        return folder.isRoot() ? ROOT_LABEL : folder.path;
     }
 
     onChooseItem(folder: TFolder): void {
@@ -43,253 +60,280 @@ class FolderSelectionModal extends FuzzySuggestModal<TFolder> {
     }
 }
 
+/** Asks before clearing the visit history. */
+class ConfirmResetModal extends Modal {
+    private onConfirm: () => void;
+
+    constructor(app: App, onConfirm: () => void) {
+        super(app);
+        this.onConfirm = onConfirm;
+    }
+
+    onOpen(): void {
+        this.titleEl.setText("Reset folder history");
+        this.contentEl.createEl("p", {
+            text: "Are you sure? This will permanently delete all folder navigation history including recently visited and frequently used folder data.",
+            cls: "mod-warning",
+        });
+        const buttons = this.contentEl.createDiv({
+            cls: "modal-button-container",
+        });
+        buttons
+            .createEl("button", { text: "Cancel" })
+            .addEventListener("click", () => this.close());
+        buttons
+            .createEl("button", {
+                text: "Reset folder history",
+                cls: "mod-warning",
+            })
+            .addEventListener("click", () => {
+                this.close();
+                this.onConfirm();
+            });
+    }
+
+    onClose(): void {
+        this.contentEl.empty();
+    }
+}
+
 export class SettingsTab extends PluginSettingTab {
     plugin: FolderNavigatorPlugin;
-
-    // Keep track of settings elements for dynamic updates
-    recentFoldersSettingEl?: HTMLElement;
-    frequentFoldersSettingEl?: HTMLElement;
-    resetHistorySettingEl?: HTMLElement;
 
     constructor(app: App, plugin: FolderNavigatorPlugin) {
         super(app, plugin);
         this.plugin = plugin;
     }
 
-    /**
-     * Updates visibility of settings based on the current display mode
-     */
-    updateSettingsVisibility(displayMode: FolderDisplayMode): void {
-        // Create settings elements if they don't exist yet
-        if (
-            !this.recentFoldersSettingEl ||
-            !this.frequentFoldersSettingEl ||
-            !this.resetHistorySettingEl
-        ) {
-            return;
-        }
-
-        // Handle recent folders setting
-        if (displayMode === FolderDisplayMode.RECENCY) {
-            this.recentFoldersSettingEl.style.display = "block";
-            this.frequentFoldersSettingEl.style.display = "none";
-        } else if (displayMode === FolderDisplayMode.FREQUENCY) {
-            this.recentFoldersSettingEl.style.display = "none";
-            this.frequentFoldersSettingEl.style.display = "block";
-        } else {
-            // Default mode - hide both
-            this.recentFoldersSettingEl.style.display = "none";
-            this.frequentFoldersSettingEl.style.display = "none";
-        }
-
-        // Only show reset history button for non-default modes
-        if (displayMode === FolderDisplayMode.DEFAULT) {
-            this.resetHistorySettingEl.style.display = "none";
-        } else {
-            this.resetHistorySettingEl.style.display = "block";
-        }
+    /** Obsidian 1.13+: rendered and indexed for settings search by the app. */
+    getSettingDefinitions(): SettingDefinitionItem[] {
+        return this.groups().map((group) => ({
+            type: "group",
+            heading: group.heading,
+            items: group.rows.map((row) => ({
+                name: row.name,
+                desc: row.desc,
+                visible: row.visible ?? true,
+                render: row.render,
+            })),
+        }));
     }
 
+    /** Obsidian below 1.13 (1.13+ uses getSettingDefinitions instead). */
     display(): void {
         const { containerEl } = this;
         containerEl.empty();
+        for (const group of this.groups()) {
+            new Setting(containerEl).setName(group.heading).setHeading();
+            for (const row of group.rows) {
+                if (row.visible && !row.visible()) continue;
+                row.render(
+                    new Setting(containerEl)
+                        .setName(row.name)
+                        .setDesc(row.desc),
+                );
+            }
+        }
+    }
 
-        // Folder display
-        new Setting(containerEl).setName("Folder display").setHeading();
+    private groups(): Group[] {
+        const { settings } = this.plugin;
+        const inMode = (mode: FolderDisplayMode) => () =>
+            settings.folderDisplayMode === mode;
 
-        // Display priority
-        new Setting(containerEl)
-            .setName("Display priority")
-            .setDesc(
-                "Control which folders appear at the top of the suggestion list before searching",
-            )
-            .addDropdown((dropdown: DropdownComponent) => {
-                dropdown
-                    .addOption(
-                        FolderDisplayMode.DEFAULT,
-                        "Default order (alphabetical)",
-                    )
-                    .addOption(
-                        FolderDisplayMode.RECENCY,
-                        "Recently visited first",
-                    )
-                    .addOption(
-                        FolderDisplayMode.FREQUENCY,
-                        "Frequently visited first",
-                    )
-                    .setValue(this.plugin.settings.folderDisplayMode)
-                    .onChange(async (value: string) => {
-                        this.plugin.settings.folderDisplayMode =
-                            value as FolderDisplayMode;
-                        await this.plugin.saveSettings();
+        return [
+            {
+                heading: "Folder display",
+                rows: [
+                    {
+                        name: "Display priority",
+                        desc: "Control which folders appear at the top of the suggestion list before searching",
+                        render: (setting) =>
+                            setting.addDropdown((dropdown) =>
+                                dropdown
+                                    .addOptions({
+                                        [FolderDisplayMode.DEFAULT]:
+                                            "Default order (alphabetical)",
+                                        [FolderDisplayMode.RECENCY]:
+                                            "Recently visited first",
+                                        [FolderDisplayMode.FREQUENCY]:
+                                            "Frequently visited first",
+                                    })
+                                    .setValue(settings.folderDisplayMode)
+                                    .onChange((value) => {
+                                        settings.folderDisplayMode =
+                                            value as FolderDisplayMode;
+                                        this.save();
+                                        this.refresh(); // show this mode's options
+                                    }),
+                            ),
+                    },
+                    {
+                        name: "Recent folders to show",
+                        desc: "Number of recently visited folders to display at the top when using 'Recently visited first' mode",
+                        visible: inMode(FolderDisplayMode.RECENCY),
+                        render: (setting) =>
+                            this.addSlider(
+                                setting,
+                                [1, 20, 1],
+                                () => settings.recentFoldersToShow,
+                                (v) => (settings.recentFoldersToShow = v),
+                            ),
+                    },
+                    {
+                        name: "Frequent folders to show",
+                        desc: "Number of frequently visited folders to display at the top when using 'Frequently visited first' mode",
+                        visible: inMode(FolderDisplayMode.FREQUENCY),
+                        render: (setting) =>
+                            this.addSlider(
+                                setting,
+                                [1, 20, 1],
+                                () => settings.frequentFoldersToShow,
+                                (v) => (settings.frequentFoldersToShow = v),
+                            ),
+                    },
+                    {
+                        name: "Maximum results",
+                        desc: "Maximum number of folders to show in search results",
+                        render: (setting) =>
+                            this.addSlider(
+                                setting,
+                                [5, 50, 5],
+                                () => settings.maxResults,
+                                (v) => (settings.maxResults = v),
+                            ),
+                    },
+                    {
+                        name: "Reset folder history",
+                        desc: "Clear the tracked history of visited folders. Warning: This will remove all recency and frequency data.",
+                        visible: () =>
+                            settings.folderDisplayMode !==
+                            FolderDisplayMode.DEFAULT,
+                        render: (setting) =>
+                            setting.addButton((button) => {
+                                button.setButtonText("Reset").onClick(() => {
+                                    new ConfirmResetModal(this.app, () => {
+                                        settings.folderHistory =
+                                            createHistory();
+                                        this.save();
+                                        new Notice(
+                                            "Folder history has been reset",
+                                        );
+                                    }).open();
+                                });
+                                if (requireApiVersion(DECLARATIVE_SETTINGS)) {
+                                    button.setDestructive().setCta();
+                                } else {
+                                    button.buttonEl.addClass("mod-warning");
+                                }
+                            }),
+                    },
+                ],
+            },
+            {
+                heading: "Folder creation",
+                rows: [
+                    {
+                        name: "Default location for new folders",
+                        desc: "Choose where new folders will be created when using the 'Create folder' option. Default is the vault root.",
+                        render: (setting) =>
+                            setting
+                                .addButton((button) =>
+                                    button
+                                        .setButtonText(
+                                            settings.newFolderLocation ||
+                                                ROOT_LABEL,
+                                        )
+                                        .onClick(() => {
+                                            new FolderSelectionModal(
+                                                this.app,
+                                                (folder) => {
+                                                    settings.newFolderLocation =
+                                                        folder.isRoot()
+                                                            ? ""
+                                                            : folder.path;
+                                                    this.save();
+                                                    button.setButtonText(
+                                                        settings.newFolderLocation ||
+                                                            ROOT_LABEL,
+                                                    );
+                                                },
+                                            ).open();
+                                        }),
+                                )
+                                .addExtraButton((button) =>
+                                    button
+                                        .setIcon("reset")
+                                        .setTooltip("Reset to root folder")
+                                        .onClick(() => {
+                                            settings.newFolderLocation = "";
+                                            this.save();
+                                            this.refresh();
+                                        }),
+                                ),
+                    },
+                ],
+            },
+            {
+                heading: "Folder navigation",
+                rows: [
+                    {
+                        name: "Expand target folder on navigation",
+                        desc: "When enabled, folders will be automatically expanded when you navigate to them",
+                        render: (setting) =>
+                            setting.addToggle((toggle) =>
+                                toggle
+                                    .setValue(settings.expandTargetFolder)
+                                    .onChange((value) => {
+                                        settings.expandTargetFolder = value;
+                                        this.save();
+                                    }),
+                            ),
+                    },
+                ],
+            },
+        ];
+    }
 
-                        // Update the visibility of settings when selection changes
-                        this.updateSettingsVisibility(
-                            value as FolderDisplayMode,
-                        );
-                    });
-            });
-
-        // Recent folders
-        this.recentFoldersSettingEl = containerEl.createDiv();
-        new Setting(this.recentFoldersSettingEl)
-            .setName("Recent folders to show")
-            .setDesc(
-                "Number of recently visited folders to display at the top when using 'Recently visited first' mode",
-            )
-            .addSlider((slider) =>
-                slider
-                    .setLimits(1, 20, 1)
-                    .setValue(this.plugin.settings.recentFoldersToShow)
-                    .setDynamicTooltip()
-                    .onChange(async (value) => {
-                        this.plugin.settings.recentFoldersToShow = value;
-                        await this.plugin.saveSettings();
-                    }),
-            );
-
-        // Frequent folders
-        this.frequentFoldersSettingEl = containerEl.createDiv();
-        new Setting(this.frequentFoldersSettingEl)
-            .setName("Frequent folders to show")
-            .setDesc(
-                "Number of frequently visited folders to display at the top when using 'Frequently visited first' mode",
-            )
-            .addSlider((slider) =>
-                slider
-                    .setLimits(1, 20, 1)
-                    .setValue(this.plugin.settings.frequentFoldersToShow)
-                    .setDynamicTooltip()
-                    .onChange(async (value) => {
-                        this.plugin.settings.frequentFoldersToShow = value;
-                        await this.plugin.saveSettings();
-                    }),
-            );
-
-        // Maximum results
-        new Setting(containerEl)
-            .setName("Maximum results")
-            .setDesc("Maximum number of folders to show in search results")
-            .addSlider((slider) =>
-                slider
-                    .setLimits(5, 50, 5)
-                    .setValue(this.plugin.settings.maxResults)
-                    .setDynamicTooltip()
-                    .onChange(async (value) => {
-                        this.plugin.settings.maxResults = value;
-                        await this.plugin.saveSettings();
-                    }),
-            );
-
-        // Reset history
-        this.resetHistorySettingEl = containerEl.createDiv();
-        new Setting(this.resetHistorySettingEl)
-            .setName("Reset folder history")
-            .setDesc(
-                "Clear the tracked history of visited folders. Warning: This will remove all recency and frequency data.",
-            )
-            .addButton((button) =>
-                button
-                    .setButtonText("Reset")
-                    .setWarning()
-                    .onClick(async () => {
-                        // Create a confirmation modal
-                        const confirmModal = new Modal(this.app);
-                        confirmModal.titleEl.setText("Reset folder history");
-                        confirmModal.contentEl.createEl("p", {
-                            text: "Are you sure? This will permanently delete all folder navigation history including recently visited and frequently used folder data.",
-                            cls: "mod-warning",
-                        });
-
-                        const buttonContainer =
-                            confirmModal.contentEl.createDiv({
-                                cls: "modal-button-container",
-                            });
-
-                        // Cancel button
-                        buttonContainer
-                            .createEl("button", {
-                                text: "Cancel",
-                            })
-                            .addEventListener("click", () => {
-                                confirmModal.close();
-                            });
-
-                        // Confirm button
-                        const confirmButton = buttonContainer.createEl(
-                            "button",
-                            {
-                                text: "Reset folder history",
-                                cls: "mod-warning",
-                            },
-                        );
-                        confirmButton.addEventListener("click", async () => {
-                            this.plugin.settings.folderHistory =
-                                createHistory();
-                            await this.plugin.saveSettings();
-                            confirmModal.close();
-                            new Notice("Folder history has been reset");
-                        });
-
-                        confirmModal.open();
-                    }),
-            );
-
-        // New folder location
-        new Setting(containerEl).setName("Folder creation").setHeading();
-
-        new Setting(containerEl)
-            .setName("Default location for new folders")
-            .setDesc(
-                "Choose where new folders will be created when using the 'Create folder' option. Default is the vault root.",
-            )
-            .addButton((button) => {
-                const displayPath =
-                    this.plugin.settings.newFolderLocation || "/ (Root)";
-                button.setButtonText(displayPath).onClick(() => {
-                    const modal = new FolderSelectionModal(
-                        this.app,
-                        this.plugin,
-                        async (folder: TFolder) => {
-                            this.plugin.settings.newFolderLocation =
-                                folder.path;
-                            await this.plugin.saveSettings();
-                            button.setButtonText(folder.path || "/ (Root)");
-                        },
-                    );
-                    modal.open();
+    /**
+     * A slider that saves on change. From 1.13 sliders show their value
+     * inline; before that the value is shown in a label next to it (the old
+     * setDynamicTooltip() is deprecated).
+     */
+    private addSlider(
+        setting: Setting,
+        [min, max, step]: [number, number, number],
+        get: () => number,
+        set: (value: number) => void,
+    ): void {
+        setting.addSlider((slider) => {
+            const label = requireApiVersion(DECLARATIVE_SETTINGS)
+                ? null
+                : setting.controlEl.createSpan({
+                      cls: "fn-slider-value",
+                      text: String(get()),
+                  });
+            slider
+                .setLimits(min, max, step)
+                .setValue(get())
+                .onChange((value) => {
+                    set(value);
+                    this.save();
+                    label?.setText(String(value));
                 });
-            })
-            .addExtraButton((button) => {
-                button
-                    .setIcon("reset")
-                    .setTooltip("Reset to root folder")
-                    .onClick(async () => {
-                        this.plugin.settings.newFolderLocation = "";
-                        await this.plugin.saveSettings();
-                        // Update button text by recreating the setting
-                        this.display();
-                    });
-            });
+        });
+    }
 
-        // Folder navigation
-        new Setting(containerEl).setName("Folder navigation").setHeading();
+    /** Re-render after a change that shows or hides rows. */
+    private refresh(): void {
+        if (requireApiVersion(DECLARATIVE_SETTINGS)) {
+            this.update();
+        } else {
+            this.display();
+        }
+    }
 
-        new Setting(containerEl)
-            .setName("Expand target folder on navigation")
-            .setDesc(
-                "When enabled, folders will be automatically expanded when you navigate to them",
-            )
-            .addToggle((toggle) =>
-                toggle
-                    .setValue(this.plugin.settings.expandTargetFolder)
-                    .onChange(async (value) => {
-                        this.plugin.settings.expandTargetFolder = value;
-                        await this.plugin.saveSettings();
-                    }),
-            );
-
-        // Initialize settings visibility based on current display mode
-        this.updateSettingsVisibility(this.plugin.settings.folderDisplayMode);
+    private save(): void {
+        this.plugin.persistSettings();
     }
 }

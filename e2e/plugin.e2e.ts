@@ -659,24 +659,99 @@ describe("Folder Navigator in Obsidian", { skip, timeout: 300_000 }, () => {
             );
         });
 
-        test("the default location can be picked and reset", async () => {
+        test("the default location can be picked (vault root included) and reset", async () => {
             await ob.resetPlugin({});
             await openSettings();
-            await ob.domClick("button", "/ (Root)");
-            await ob.waitFor(({ app }) => {
-                const input =
-                    app.setting.modalEl.ownerDocument.querySelector<HTMLInputElement>(
-                        ".prompt-input",
-                    );
-                if (!input) return false;
-                input.value = "Projects";
-                input.dispatchEvent(new Event("input"));
-                return true;
-            }, []);
-            await ob.domClick(".suggestion-item", "Projects");
+            const pick = async (button: string, query: string, row: string) => {
+                await ob.domClick("button", button);
+                await ob.waitFor(
+                    ({ app }, q) => {
+                        const input =
+                            app.setting.modalEl.ownerDocument.querySelector<HTMLInputElement>(
+                                ".prompt-input",
+                            );
+                        if (!input) return false;
+                        input.value = q;
+                        input.dispatchEvent(new Event("input"));
+                        return true;
+                    },
+                    [query],
+                );
+                await ob.domClick(".suggestion-item", row);
+            };
+
+            await pick("/ (Root)", "Projects", "Projects");
+            await waitForData(ob, (d) => d.newFolderLocation === "Projects");
+            await pick("Projects", "", "/ (Root)"); // S5: the root is selectable
+            await waitForData(ob, (d) => d.newFolderLocation === "");
+            await pick("/ (Root)", "Projects", "Projects");
             await waitForData(ob, (d) => d.newFolderLocation === "Projects");
             await ob.domClick(".clickable-icon", "Reset to root folder");
             await waitForData(ob, (d) => d.newFolderLocation === "");
+        });
+
+        test("the pre-1.13 display() path renders the same rows as the definitions", async () => {
+            await ob.resetPlugin({});
+            await ob.closeModals();
+            const result = await ob.evaluate(({ plugin }) => {
+                const tab = (
+                    plugin as unknown as {
+                        settingTab: {
+                            containerEl: HTMLElement;
+                            display(): void;
+                            getSettingDefinitions(): Array<{
+                                heading: string;
+                                items: Array<{
+                                    name: string;
+                                    visible: boolean | (() => boolean);
+                                }>;
+                            }>;
+                        };
+                    }
+                ).settingTab;
+                const out: Record<
+                    string,
+                    { legacy: string[]; declarative: string[] }
+                > = {};
+                for (const mode of [
+                    "default",
+                    "recency",
+                    "frequency",
+                ] as const) {
+                    plugin.settings.folderDisplayMode = mode;
+                    tab.display();
+                    out[mode] = {
+                        legacy: Array.from(
+                            tab.containerEl.querySelectorAll(
+                                ".setting-item-name",
+                            ),
+                        ).map((e) => e.textContent ?? ""),
+                        declarative: tab
+                            .getSettingDefinitions()
+                            .flatMap((g) => [
+                                g.heading,
+                                ...g.items
+                                    .filter((i) =>
+                                        typeof i.visible === "function"
+                                            ? i.visible()
+                                            : i.visible,
+                                    )
+                                    .map((i) => i.name),
+                            ]),
+                    };
+                }
+                plugin.settings.folderDisplayMode = "default";
+                tab.containerEl.empty();
+                return out;
+            });
+            for (const [mode, r] of Object.entries(result)) {
+                assert.deepEqual(r.legacy, r.declarative, mode);
+            }
+            assert.ok(result.recency.legacy.includes("Recent folders to show"));
+            assert.ok(
+                result.frequency.legacy.includes("Frequent folders to show"),
+            );
+            assert.ok(!result.default.legacy.includes("Reset folder history"));
         });
 
         test("corrupted data.json falls back to defaults", async () => {
