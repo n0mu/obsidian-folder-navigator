@@ -19,16 +19,22 @@ Open it with the command **Folder Navigator Hardened: Navigate to folder**, or b
 
 ## Installation
 
-The plugin isn't in the Community plugins directory. Install it either way:
+This fork is for personal use. It isn't in the Community plugins directory and has no published releases. To install it, build from source:
 
-- **BRAT:** add `n0mu/obsidian-folder-navigator` in [Obsidian42 - BRAT](https://github.com/TfTHacker/obsidian42-brat).
-- **Manually:** download `main.js`, `manifest.json` and `styles.css` from a [release](https://github.com/n0mu/obsidian-folder-navigator/releases), put them in `<vault>/.obsidian/plugins/folder-navigator-hardened/`, reload Obsidian, and enable the plugin.
+```sh
+npm ci --ignore-scripts
+npm run build
+mkdir -p <vault>/.obsidian/plugins/folder-navigator-hardened
+cp build/main.js build/manifest.json build/styles.css <vault>/.obsidian/plugins/folder-navigator-hardened/
+```
+
+Then reload Obsidian and enable **Folder Navigator Hardened** under Community plugins.
 
 Requires Obsidian 1.7.2 or later, on desktop and mobile.
 
 ### Verifying a release
 
-Release files are built by GitHub Actions from the tagged commit, never on a developer machine, and carry a signed [build provenance attestation](https://docs.github.com/en/actions/security-guides/using-artifact-attestations-to-establish-provenance-for-builds). To check a downloaded file:
+No releases are published at the moment. If one is cut, its files are built by GitHub Actions from the tagged commit, never on a developer machine, and carry a signed [build provenance attestation](https://docs.github.com/en/actions/security-guides/using-artifact-attestations-to-establish-provenance-for-builds). To check a downloaded file:
 
 ```sh
 gh attestation verify main.js --repo n0mu/obsidian-folder-navigator
@@ -81,7 +87,7 @@ npm run test:e2e     # build, then drive a temporary Obsidian instance
 
 `test:e2e` needs Obsidian installed locally (set `OBSIDIAN_BIN` if it isn't in the default place). It uses a temporary vault and profile, so it doesn't touch your own, and it is skipped when Obsidian isn't found. CI doesn't run it; `npm version` does (through `preversion`), so run releases from a machine with Obsidian.
 
-Releasing: `npm version <x.y.z>` (or `x.y.z-rc.n` for a pre-release) updates `manifest.json`, `versions.json` and `CHANGELOG.md`, commits, tags and pushes. The tag triggers the release workflow, which builds, attests and creates a **draft** release to review and publish.
+Releasing (not used for now, the fork is for local use): `npm version <x.y.z>` (or `x.y.z-rc.n` for a pre-release) updates `manifest.json`, `versions.json` and `CHANGELOG.md`, commits, tags and pushes. The tag triggers the release workflow, which builds, attests and creates a **draft** release to review and publish.
 
 How search scores and dedupes folders is specified by the tests in [`test/search.test.ts`](test/search.test.ts), next to the implementation in [`src/search.ts`](src/search.ts).
 
