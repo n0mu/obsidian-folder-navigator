@@ -12,7 +12,6 @@ export type FolderDisplayMode =
 export interface PluginSettings {
     maxResults: number;
     expandTargetFolder: boolean;
-    debugMode: boolean;
     folderDisplayMode: FolderDisplayMode;
     recentFoldersToShow: number;
     frequentFoldersToShow: number;
@@ -24,7 +23,6 @@ export function defaultSettings(): PluginSettings {
     return {
         maxResults: 10,
         expandTargetFolder: true,
-        debugMode: false,
         folderDisplayMode: FolderDisplayMode.DEFAULT,
         recentFoldersToShow: 5,
         frequentFoldersToShow: 5,
@@ -64,7 +62,6 @@ export function parseSettings(raw: unknown): PluginSettings {
             typeof r.expandTargetFolder === "boolean"
                 ? r.expandTargetFolder
                 : d.expandTargetFolder,
-        debugMode: typeof r.debugMode === "boolean" ? r.debugMode : d.debugMode,
         folderDisplayMode: isDisplayMode(r.folderDisplayMode)
             ? r.folderDisplayMode
             : d.folderDisplayMode,

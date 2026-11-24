@@ -33,7 +33,8 @@ test("valid stored values are kept", () => {
     });
     assert.equal(s.maxResults, 25);
     assert.equal(s.expandTargetFolder, false);
-    assert.equal(s.debugMode, true);
+    // Removed setting (debug mode, D3): stale keys are dropped, not kept.
+    assert.ok(!("debugMode" in s));
     assert.equal(s.folderDisplayMode, "frequency");
     assert.equal(s.recentFoldersToShow, 3);
     assert.equal(s.frequentFoldersToShow, 12);

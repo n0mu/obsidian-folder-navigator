@@ -173,11 +173,11 @@ Files: new `src/search.ts`, `test/search.test.ts`, `src/folderSuggestModal.ts`.
 
 Files: new `src/explorer.ts`, `src/folderSuggestModal.ts`.
 
-- [ ] SEC-4: one guarded accessor for the explorer leaf + `revealInFolder`; no prototype enumeration; Notice when the explorer is unavailable (e.g. core plugin disabled).
-- [ ] SEC-5: path-based selector scoped to the explorer leaf `containerEl`; drop ancestor click chain; expand target only (`is-collapsed` check) per `expandTargetFolder`.
-- [ ] SEC-9/10: remove debug mode + `log()`; window timers; clear the highlight timer handle.
-- [ ] Test duplicate folder names (`A/notes`, `B/notes`), deep nesting, explorer closed/collapsed sidebar, mobile (drawer), and a popout window.
-- [ ] Accept: `prefer-active-doc`, `prefer-window-timers` warnings gone; §6 checks 1–4, 7 pass.
+- [x] SEC-4: one guarded accessor for the explorer leaf + `revealInFolder`; no prototype enumeration; Notice when the explorer is unavailable (e.g. core plugin disabled).
+- [x] SEC-5: path-based selector scoped to the explorer leaf `containerEl`; drop ancestor click chain; expand target only (`is-collapsed` check) per `expandTargetFolder`.
+- [x] SEC-9/10: remove debug mode + `log()`; window timers; clear the highlight timer handle.
+- [ ] Test duplicate folder names (`A/notes`, `B/notes`), deep nesting, explorer closed/collapsed sidebar, mobile (drawer), and a popout window. **Pending: needs a real vault.**
+- [ ] Accept: `prefer-active-doc`, `prefer-window-timers` warnings gone ✅ (all folderSuggestModal/explorer lint is gone); §6 checks 1–4, 7 pass (**pending**).
 
 ### S5: Settings tab and main cleanup
 
@@ -185,7 +185,7 @@ Files: `src/settingsTab.ts`, `src/main.ts`.
 
 - [ ] QUAL-1: conditional rendering instead of `style.display`; re-render on mode change (`this.display()`).
 - [ ] If D2 = 1.13: migrate to `getSettingDefinitions()` + `SettingFolderControl`, delete `FolderSelectionModal`. Otherwise keep the modal but drop its unused `plugin` param and use `getAllFolders(true)` so root is selectable.
-- [ ] Remove debug toggle (D3); headings via `setHeading()` (already), sentence case text.
+- [x] Remove debug toggle (D3), done in S4. Headings via `setHeading()` (already), sentence case text.
 - [ ] Accept: `npx eslint .` → **0 errors, 0 warnings** (deliberate disables commented). `npm run typecheck` clean.
 
 ### S6: Release pipeline, metadata, docs
@@ -301,3 +301,36 @@ Files: `.github/workflows/*`, `.github/dependabot.yml`, `.github/FUNDING.yml`, `
 - Build: `build/main.js` 17.2 kB, still only `require("obsidian")`.
 - **Still not verified in a real vault:** §6 checks 1–6 (carried over from S1 and S2), plus for S3: highlighting looks the same, separators are inert, the create row appears with many matches, and the empty-query list matches the old build in recency and frequency mode.
 - Next: S4.
+
+### S4 - 2026-11-24 - branch `hardening`
+- Done: SEC-4, 5, 9, 10, and D3 (debug mode removed). The S5 item "remove debug toggle" was done here too: removing the setting meant removing the toggle.
+- Checked in the Obsidian 1.15.1 bundle (`~/Library/Application Support/obsidian/obsidian-1.15.1.asar`) before writing the code:
+  - The file-explorer **view** has `revealInFolder(file)`. It expands collapsed ancestors, focuses the item, and scrolls it into view on the next frame. The **plugin instance**'s async `revealInFolder` only adds "find or create the leaf, `revealLeaf`, `setActiveLeaf`" on top.
+  - Explorer title rows (`.nav-folder-title`) carry `data-path` = the file's path, which answers the S0 open question.
+  - Clicking a folder title toggles it.
+  - `Modal.close()` restores the previous selection synchronously, and `selectSuggestion` closes the modal before calling `onChooseSuggestion`. So the 100 ms "wait for the modal to close" delays are gone.
+- New `src/explorer.ts` (`FolderRevealer`, owned by the plugin; `cancel()` runs on unload via `this.register`):
+  1. Take the existing `file-explorer` leaf (`getLeavesOfType`).
+  2. `await revealLeaf`, which also loads a deferred view and opens the drawer on mobile.
+  3. Feature-check `view.revealInFolder` and call it.
+  4. Wait up to 30 animation frames for `.nav-folder-title[data-path="…"]` inside **that leaf's** `containerEl`.
+  5. If expanding is on and `.nav-folder` is `is-collapsed`, click the title once.
+  6. Highlight for 2 s with one `el.win.setTimeout`, cleared on the next reveal or on unload.
+  - A "generation" counter stops stale work when a new reveal starts or the plugin unloads.
+  - Failures show a Notice and log with `console.error`. Nothing fails silently.
+- Deviation from plan: when no explorer leaf exists, the plugin shows a Notice instead of creating one. `ensureSideLeaf` would create a broken "plugin not active" leaf when the Files core plugin is disabled, and checking whether it's enabled needs `app.internalPlugins`. As a result, `internalPlugins` is no longer used anywhere. Trade-off: if the user closed the explorer tab while the core plugin is still enabled, they now get a Notice where the core plugin would have reopened the tab.
+- Removed: the ancestor click chain (it clicked by **name**, so with duplicate names it hit the first match), whole-`document` queries, prototype enumeration, `log()` with its ~30 call sites, the private-API interfaces, `getParentFolderChain`, and every bare `setTimeout`.
+- The modal goes from 521 to 216 lines; with `explorer.ts` (123) that's 339 in total.
+- `debugMode` was removed from `PluginSettings`. `parseSettings` drops the stale key; the test now asserts this.
+- Lint: 31 → **15 problems (10 errors, 5 warnings)**, all in `settingsTab.ts` and all S5: style.display ×8, misused promises ×2, deprecated ×4, setting definitions ×1. Typecheck clean, 39 tests pass, `npm audit` 0. Build: `build/main.js` 15.2 kB, only `require("obsidian")`, and it contains no `internalPlugins`, `getPrototypeOf` or `console.log`.
+- **Not verified in a real vault** (S4 is the riskiest session for this):
+  - §6 checks 1–4 and 7.
+  - Duplicate names (`A/notes`, `B/notes`).
+  - Deep nesting with collapsed ancestors.
+  - A collapsed sidebar.
+  - Mobile drawer.
+  - Popout window.
+  - Creating a folder and then revealing it.
+  - Rapid repeated navigation: the highlight should move, not stack.
+- Left for S6: `docs/implementation/SEARCH_IMPROVEMENTS.md` still describes debug logging.
+- Next: S5.

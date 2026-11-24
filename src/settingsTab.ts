@@ -291,22 +291,5 @@ export class SettingsTab extends PluginSettingTab {
 
         // Initialize settings visibility based on current display mode
         this.updateSettingsVisibility(this.plugin.settings.folderDisplayMode);
-
-        // Add advanced section
-        new Setting(containerEl).setName("Advanced").setHeading();
-
-        new Setting(containerEl)
-            .setName("Debug mode")
-            .setDesc(
-                "Enable detailed logging to console for troubleshooting issues. This may affect performance and should be disabled during normal use.",
-            )
-            .addToggle((toggle) =>
-                toggle
-                    .setValue(this.plugin.settings.debugMode)
-                    .onChange(async (value) => {
-                        this.plugin.settings.debugMode = value;
-                        await this.plugin.saveSettings();
-                    }),
-            );
     }
 }

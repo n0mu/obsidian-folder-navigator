@@ -3,12 +3,17 @@ import { SettingsTab } from "./settingsTab";
 import { type PluginSettings, parseSettings } from "./settings";
 import { FolderSuggestModal } from "./folderSuggestModal";
 import { deleteFromHistory, recordVisit, renameInHistory } from "./history";
+import { FolderRevealer } from "./explorer";
 
 export default class FolderNavigatorPlugin extends Plugin {
     settings!: PluginSettings;
+    revealer!: FolderRevealer;
 
     async onload() {
         await this.loadSettings();
+
+        this.revealer = new FolderRevealer(this.app);
+        this.register(() => this.revealer.cancel());
 
         this.addSettingTab(new SettingsTab(this.app, this));
 
