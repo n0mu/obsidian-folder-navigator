@@ -5,7 +5,14 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { buildAtRef, Obsidian, obsidianBinary, type Row } from "./obsidian.ts";
+import {
+    buildAtRef,
+    COMMAND_ID,
+    Obsidian,
+    obsidianBinary,
+    PLUGIN_ID,
+    type Row,
+} from "./obsidian.ts";
 
 const FOLDERS = [
     "A/notes",
@@ -79,30 +86,31 @@ describe("Folder Navigator in Obsidian", { skip, timeout: 300_000 }, () => {
     });
 
     test("S1: the built plugin loads and registers its command", async () => {
-        const state = await ob.evaluate(({ app, plugin }) => ({
-            loaded: plugin !== undefined,
-            command:
-                "folder-navigator:open-folder-navigator" in
-                app.commands.commands,
-        }));
+        const state = await ob.evaluate(
+            ({ app, plugin }, command) => ({
+                loaded: plugin !== undefined,
+                command: command in app.commands.commands,
+            }),
+            COMMAND_ID,
+        );
         assert.deepEqual(state, { loaded: true, command: true });
     });
 
     test("reloading the plugin leaves exactly one settings tab and one instance", async () => {
         await ob.resetPlugin({});
         await ob.resetPlugin({});
-        const tabs = await ob.evaluate(({ app, plugin }) => {
+        const tabs = await ob.evaluate(({ app, plugin }, id) => {
             const all = (
                 app.setting as unknown as {
                     pluginTabs: Array<{ id: string; plugin: unknown }>;
                 }
             ).pluginTabs;
-            const ours = all.filter((t) => t.id === "folder-navigator");
+            const ours = all.filter((t) => t.id === id);
             return {
                 count: ours.length,
                 current: ours.every((t) => t.plugin === plugin),
             };
-        });
+        }, PLUGIN_ID);
         assert.deepEqual(tabs, { count: 1, current: true });
     });
 
@@ -351,10 +359,9 @@ describe("Folder Navigator in Obsidian", { skip, timeout: 300_000 }, () => {
             });
             assert.ok(popoutCount > 0, "popout opened");
             // Drive the modal inside the popout with DOM events (CDP input goes to the main window).
-            await ob.evaluate(({ app }) =>
-                app.commands.executeCommandById(
-                    "folder-navigator:open-folder-navigator",
-                ),
+            await ob.evaluate(
+                ({ app }, command) => app.commands.executeCommandById(command),
+                COMMAND_ID,
             );
             await ob.waitFor(({ app }) => {
                 let found = false;
@@ -577,17 +584,17 @@ describe("Folder Navigator in Obsidian", { skip, timeout: 300_000 }, () => {
 
         async function openSettings(): Promise<void> {
             await ob.closeModals();
-            await ob.evaluate(({ app }) => {
+            await ob.evaluate(({ app }, id) => {
                 app.setting.open();
-                app.setting.openTabById("folder-navigator");
-            });
+                app.setting.openTabById(id);
+            }, PLUGIN_ID);
             await ob.waitFor(
-                ({ app }) =>
-                    app.setting.activeTab?.id === "folder-navigator" &&
+                ({ app }, id) =>
+                    app.setting.activeTab?.id === id &&
                     app.setting.activeTab.containerEl.querySelector(
                         "select",
                     ) !== null,
-                [],
+                [PLUGIN_ID],
             );
         }
 

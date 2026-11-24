@@ -1,6 +1,6 @@
 # Folder Navigator: security audit and hardening plan
 
-Status: **audit done, no code changed yet**. Audited at commit `4175b9d` (v0.5.0) on 2026-11-24.
+Status: **S1–S6 done on branch `hardening`; S6 release acceptance (CI run + attested pre-release) pending a push**. Audited at commit `4175b9d` (v0.5.0) on 2026-11-24.
 
 ## How to use this file
 
@@ -113,6 +113,7 @@ Target devDependencies after S1: `esbuild`, `eslint`, `eslint-plugin-obsidianmd`
   - (a) *Recommended if you'll install it yourself or publish separately:* new `id` (e.g. `folder-navigator-hardened`), new name, your author fields. Remove upstream funding. Keep upstream attribution in README and LICENSE, and add your own copyright line, since Apache-2.0 §4 requires stating changes.
   - (b) Keep the ID and upstream the fixes as PRs. Then leave the manifest identity alone and split S1–S6 into upstreamable PRs.
   - Settle this before S6. S1–S5 don't depend on it.
+  - *Decided in S6:* **(a)**. ID `folder-navigator-hardened`, name "Folder Navigator Hardened", author `n0mu`.
 - **D2. `minAppVersion`.** (a) *Recommended:* **1.7.2**. It covers `getAllFolders` and Promise-returning `revealLeaf`, and loses nobody realistic. (b) **1.13.0** also unlocks `getSettingDefinitions()` and the built-in `SettingFolderControl` (folder picker with `includeRoot`), which deletes `FolderSelectionModal` and most of `settingsTab.ts`. Lint then warns `settings-tab/prefer-setting-definitions` unless you migrate. Choose (b) only if you're fine requiring 1.13+.
   - *S5 update:* the commented-disable plan below doesn't work: `obsidianmd.configs.recommended` forbids disabling `no-deprecated` and `prefer-setting-definitions` (`eslint-comments/no-restricted-disable`). S5 stays on 1.7.2 by implementing both paths, guarded with `requireApiVersion("1.13.0")`; see the S5 log.
   - *S1 update:* the baseline also flags `setDynamicTooltip` (×3) and `setWarning` as deprecated (`@typescript-eslint/no-deprecated`). The replacement, `setDestructive()`, is `@since 1.13.0`. With (a), S5 keeps both calls and adds an `eslint-disable-next-line` comment explaining the minAppVersion. With (b), they're replaced cleanly.
@@ -193,10 +194,10 @@ Files: `src/settingsTab.ts`, `src/main.ts`.
 
 Files: `.github/workflows/*`, `.github/dependabot.yml`, `.github/FUNDING.yml`, `manifest.json`, `README.md`, `LICENSE`, `CHANGELOG.md`, `version-changelog.mjs`, `package.json`.
 
-- [ ] CI-1…7 as listed. Release workflow: `npm ci --ignore-scripts` → `npm run lint && npm run typecheck && npm test && npm run build` → attest → draft release with `build/main.js`, `build/manifest.json`, `build/styles.css`.
-- [ ] D1 identity changes; README: fork notice, what changed vs upstream, privacy note (history stored in `data.json`, no network access), remove stale `docs/implementation/SEARCH_IMPROVEMENTS.md` or update it to point at `search.ts` tests.
-- [ ] `validate-manifest` / `validate-license` lint clean.
-- [ ] Accept: tag a pre-release in the fork; workflow green; `gh attestation verify build/main.js --repo n0mu/obsidian-folder-navigator` succeeds; (if you have dashboard access) preview scan passes.
+- [x] CI-1…7 as listed. Release workflow: `npm ci --ignore-scripts` → `npm run lint && npm run typecheck && npm test && npm run build` → attest → draft release with `build/main.js`, `build/manifest.json`, `build/styles.css`.
+- [x] D1 identity changes; README: fork notice, what changed vs upstream, privacy note (history stored in `data.json`, no network access), remove stale `docs/implementation/SEARCH_IMPROVEMENTS.md` or update it to point at `search.ts` tests.
+- [x] `validate-manifest` / `validate-license` lint clean.
+- [ ] Accept (needs a push, see the S6 log): tag a pre-release in the fork; workflow green; `gh attestation verify build/main.js --repo n0mu/obsidian-folder-navigator` succeeds; (if you have dashboard access) preview scan passes.
 
 ---
 
@@ -372,3 +373,40 @@ Every item below is covered by `e2e/plugin.e2e.ts`. The suite runs in a separate
 - `main.ts` needed no changes.
 - Not verified: rendering on Obsidian below 1.13. The e2e test calls `display()` on 1.15, which proves the rows and visibility logic but uses 1.15's components.
 - Next: S6. Settle D1 (plugin identity) first. Running `test:e2e` in CI would need Obsidian downloaded on the runner plus xvfb on Linux; decide whether that's worth it, or keep e2e local and run it before each release.
+
+### S6 - 2026-11-24 - branch `hardening`
+- Decisions: D1 = (a), a new plugin ID. E2E stays local: CI runners don't have Obsidian, so `preversion` runs `test:e2e` instead (it skips itself when Obsidian isn't installed).
+- Identity (D1):
+  - `manifest.json`: id `folder-navigator-hardened`, name "Folder Navigator Hardened", author `n0mu`. `fundingUrl` was removed.
+  - `package.json`: name and author changed, `repository` added, and the invalid `version-tag-prefix` key removed (`.npmrc` already sets it).
+  - `.github/FUNDING.yml` was deleted.
+  - LICENSE: kept the upstream copyright line and added `Copyright 2026 n0mu (modifications…)`.
+  - The e2e tests read the ID from `manifest.json` instead of hardcoding `folder-navigator`.
+  - The command ID (`open-folder-navigator`), the CSS class `folder-navigator-modal` and the "Folder Navigator:" prefix on notices and errors were left alone.
+  - Users of upstream get a separate plugin folder and `data.json`. Settings and hotkeys don't carry over.
+- `versions.json` was reset to `{}`. Upstream's entries pointed at releases that don't exist in this repo, and Obsidian would try to download them for apps below `minAppVersion`. The next `npm version` writes the first entry.
+- CI:
+  - CI-1: actions are pinned to SHAs, each released ≥ 7 days ago: checkout v7.0.1, setup-node v7.1.0, attest v4.2.2.
+  - CI-1/CI-3: `softprops/action-gh-release` was replaced with the preinstalled `gh release create`, leaving one less third-party action. Provenance uses `actions/attest` directly; `attest-build-provenance` v4 is only a wrapper around it.
+  - CI-2: Node 24, `npm ci --ignore-scripts`, `persist-credentials: false`, no npm cache. Default permissions are `{}`; the release job gets `contents`, `id-token` and `attestations: write`.
+  - CI-5: `ci.yml` runs on pushes to any branch and on PRs: lint, unit tests, build (which includes typecheck), and `npm audit --audit-level=moderate`.
+  - Release: the tag must equal the manifest and package versions. Then lint, test, build, attest, and a **draft** release; tags with a `-` become pre-releases. Release notes come from the CHANGELOG section, or for a pre-release, the commits since the last stable release.
+  - CI-6: `dependabot.yml` covers npm and github-actions, weekly, with `cooldown: 7` days. Minor and patch dev updates are grouped. Majors are ignored for typescript (7 is unsupported by typescript-eslint), eslint (10 is blocked by the plugin) and `@types/node` (it follows Node 24).
+  - CI-7: `version-changelog.mjs` was rewritten:
+    - Exactly one blank line around the new section; `CHANGELOG.md` was cleaned up.
+    - No `git add`, and `execFileSync` instead of a shell.
+    - Pre-releases are skipped.
+    - Refuses a duplicate section.
+    - New `--notes <version>` mode for the release workflow.
+    - **The fork has no git tags** (upstream's weren't fetched). When no stable tag exists, the "last release" falls back to the commit whose subject is the newest changelog version (`4175b9d` "0.5.0").
+  - `version-bump.mjs` doesn't record pre-releases in `versions.json`, and ends files with a newline. `postversion` is `git push --follow-tags`, which pushes only the new tag.
+- Docs:
+  - README rewritten: fork notice, install (BRAT and manual), attestation check, privacy, changes from upstream, development and release.
+  - `docs/implementation/SEARCH_IMPROVEMENTS.md` was deleted: its code was stale and it described debug logging. The README points to `test/search.test.ts`.
+- Verified locally: `npx eslint .` reports 0 problems (`validate-manifest` and `validate-license` included), typecheck is clean, 39 unit tests and **32/32 e2e tests pass with the new ID**, `npm audit` is 0, and `build/main.js` is 14.6 kB. The changelog and bump scripts were exercised in a scratch clone: rc notes without tags, a stable section, the duplicate guard, and the rc being skipped in `versions.json`.
+- Not verified: the workflows themselves, because nothing has been pushed. actionlint and zizmor aren't installed; the YAML parses.
+- **Still open (accept):** push `hardening`, check that `ci.yml` is green, then cut a pre-release from this branch:
+  1. `npm version 0.6.0-rc.1`. This runs lint, unit tests and e2e, commits, tags and pushes.
+  2. Check that the release workflow is green and the draft pre-release has 3 assets.
+  3. `gh release download 0.6.0-rc.1 -p main.js -D /tmp/rc && gh attestation verify /tmp/rc/main.js --repo n0mu/obsidian-folder-navigator`.
+  4. Then merge to `main` and cut `0.6.0`.

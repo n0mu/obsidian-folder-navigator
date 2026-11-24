@@ -1,7 +1,11 @@
 {
-    "name": "folder-navigator",
+    "name": "folder-navigator-hardened",
     "version": "0.5.0",
     "description": "Quickly navigate to folders in your vault using fuzzy search.",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/n0mu/obsidian-folder-navigator.git"
+    },
     "main": "main.js",
     "private": true,
     "type": "module",
@@ -16,15 +20,14 @@
         "format": "prettier -w \"src/**/*.ts\" \"test/**/*.ts\" \"e2e/**/*.ts\"",
         "test": "node --test \"test/**/*.test.ts\"",
         "test:e2e": "npm run build && node --test --test-concurrency=1 \"e2e/**/*.e2e.ts\"",
-        "preversion": "npm run lint && npm run test && npm run build",
+        "preversion": "npm run lint && npm test && npm run test:e2e",
         "version": "node version-bump.mjs && node version-changelog.mjs && git add manifest.json versions.json CHANGELOG.md",
-        "postversion": "git push && git push --tags"
+        "postversion": "git push --follow-tags"
     },
-    "version-tag-prefix": "",
     "keywords": [
         "obsidian"
     ],
-    "author": "wenlzhang",
+    "author": "n0mu",
     "license": "Apache-2.0",
     "devDependencies": {
         "@types/node": "24.19.2",

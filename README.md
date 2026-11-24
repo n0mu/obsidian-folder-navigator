@@ -1,64 +1,90 @@
-# Folder Navigator
+# Folder Navigator Hardened
 
-[![GitHub release (Latest by date)](https://img.shields.io/github/v/release/wenlzhang/obsidian-folder-navigator)](https://github.com/wenlzhang/obsidian-folder-navigator/releases) ![GitHub all releases](https://img.shields.io/github/downloads/wenlzhang/obsidian-folder-navigator/total?color=success)
+An [Obsidian](https://obsidian.md) plugin to quickly navigate to folders in your vault using fuzzy search.
 
-An [Obsidian](https://obsidian.md) plugin that allows you to quickly navigate to folders in your vault using fuzzy search.
+> **This is a fork** of [wenlzhang/obsidian-folder-navigator](https://github.com/wenlzhang/obsidian-folder-navigator) (Folder Navigator 0.5.0) by wenlzhang. It has its own plugin ID, `folder-navigator-hardened`, so it installs next to the original and keeps its own settings and history. All credit for the idea and the original plugin goes to the upstream author. See [Changes from upstream](#changes-from-upstream).
 
 ![demo](/docs/attachment/demo.gif)
 
 ## Features
 
-- Quick folder navigation using fuzzy search
-- Expand target folder on navigation
-- Smart folder prioritization options:
-	- Default order (alphabetical)
-	- Recently visited folders displayed at the top
-	- Frequently visited folders displayed at the top
-- Option to reset folder navigation history if needed
+- Navigate to any folder with fuzzy search, the way you open files with quick switcher.
+- Keywords match in any order: `bar foo` finds `foo/bar/baz`.
+- Children of a matched folder are hidden unless they match more keywords, so `abc` shows `abc`, not every folder below it.
+- The chosen folder is revealed in the file explorer, optionally expanded, and briefly highlighted.
+- Create a folder from the search box when nothing matches.
+- Order the empty-query list alphabetically, by recently visited, or by frequently visited folders, and reset that history at any time.
 
+Open it with the command **Folder Navigator Hardened: Navigate to folder**, or bind a hotkey to it.
 
-## Videos and Articles
+## Installation
 
-### Articles
+The plugin isn't in the Community plugins directory. Install it either way:
 
-- [The Strategy of Note Taking: Folders, Tags, Links, and Redundancy - PTKM](https://ptkm.net/blog-note-taking-strategy-folders-tags-links-redundancy)
+- **BRAT:** add `n0mu/obsidian-folder-navigator` in [Obsidian42 - BRAT](https://github.com/TfTHacker/obsidian42-brat).
+- **Manually:** download `main.js`, `manifest.json` and `styles.css` from a [release](https://github.com/n0mu/obsidian-folder-navigator/releases), put them in `<vault>/.obsidian/plugins/folder-navigator-hardened/`, reload Obsidian, and enable the plugin.
 
-## Why Folder Navigator?
+Requires Obsidian 1.7.2 or later, on desktop and mobile.
 
-I really enjoy using Obsidian's file search feature, which allows us to quickly search for files and navigate to them. There are also third-party plugins that further enhance this experience.
+### Verifying a release
 
-However, I need to navigate to folders in a similar way. Unfortunately, I couldn't find a method to do this, either by using Obsidian's official features or third-party plugins. That's why I'm developing this plugin to achieve that. **It allows you to navigate to folders just as you can when navigating to files.**
+Release files are built by GitHub Actions from the tagged commit, never on a developer machine, and carry a signed [build provenance attestation](https://docs.github.com/en/actions/security-guides/using-artifact-attestations-to-establish-provenance-for-builds). To check a downloaded file:
 
-## Documentation
+```sh
+gh attestation verify main.js --repo n0mu/obsidian-folder-navigator
+```
 
-📚 **[View Full Documentation](https://ptkm.net/obsidian-folder-navigator)**
+## Privacy
 
-Visit the documentation site to learn how to make the most of Folder Navigator in your Obsidian workflow.
+- **No network access.** The plugin makes no requests of any kind and has no runtime dependencies.
+- **Folder history stays in your vault.** In the "recently visited" and "frequently visited" modes, the plugin stores the paths of folders you navigate to, with a visit time and count, in `.obsidian/plugins/folder-navigator-hardened/data.json`. If you sync your vault, that file syncs with it. The history follows folder renames, drops deleted folders, and keeps at most 200 entries. **Reset folder history** in the settings clears it.
+- Nothing is logged to the console except real errors.
 
-## Support & Community
+## Changes from upstream
 
-This plugin is developed and maintained during my free time. A lot of thought, energy, and care goes into making it reliable and user-friendly.
+Based on upstream 0.5.0. The full audit, with a finding ID for every change, is in [`handoff.md`](handoff.md).
 
-If you find Folder Navigator valuable in your daily workflow:
+**Fixes**
 
-- If it helps you organize your folders more effectively
-- If it saves you time and mental energy navigating your knowledge base
+- `minAppVersion` is now 1.7.2. Upstream declared 1.5.3 but uses APIs from 1.6.6 and 1.7.2, so it crashed on older apps.
+- Revealing a folder targets the selected folder by path. Upstream clicked the first folder with the same *name*, so with `A/notes` and `B/notes` it often revealed the wrong one.
+- Folder names are validated before a folder is created: empty names, `.`/`..` and hidden segments, `\ : * ? " < > |`, control characters, trailing dots and Windows reserved names are rejected with a notice. Missing parent folders are created. If the default location no longer exists, the folder is created at the vault root.
+- Folders named like built-in object properties (`constructor`, `toString`, `__proto__`) no longer corrupt or fake the visit history.
+- Settings from a hand-edited or synced `data.json` are type-checked and clamped; bad values fall back to defaults.
+- The visit history follows renames and deletes and is capped.
+- Plugin styles are scoped to its own modal. Upstream's bold match highlight leaked into every Obsidian suggester.
+- Search results no longer contain the "Recently visited" separators, and the "Create new folder" row is no longer cut off when many folders match.
+- Overlapping keywords no longer render duplicated characters.
 
-Please consider supporting my work. Your support would help me dedicate more time and energy to:
+**Internals**
 
-- Developing new features
-- Maintaining code quality
-- Providing support and documentation
-- Making the plugin even better for everyone
+- No private Obsidian APIs (`app.internalPlugins`) and no probing of internal prototypes. The explorer is reached through its leaf, with feature checks and a notice when it isn't available.
+- Debug mode and its logging were removed.
+- Search, history, settings parsing and path validation are pure modules with unit tests (`npm test`). The whole plugin is tested end to end in a real Obsidian instance (`npm run test:e2e`).
+- The settings tab uses the declarative settings API on Obsidian 1.13+ (searchable in settings) and the classic one below.
+- `eslint-plugin-obsidianmd`'s recommended config passes with 0 errors, 0 warnings and no disables.
+- Dependencies: 0 runtime, 8 dev (down from 1 and 18), `npm audit` clean, exact versions, install scripts disabled.
+- Releases are built in CI with pinned actions and provenance attestation. Dependabot updates dependencies weekly after a 7-day cooldown.
 
-### Ways to Support
+## Development
 
-You can support this project in several ways:
+Requires Node 24 (`mise x node@24 -- npm …` works without a global install).
 
-- ⭐ Star the project on GitHub
-- 💝 <a href='https://ko-fi.com/C0C66C1TB' target='_blank'><img height='36' style='border:0px;height:36px;' src='https://storage.ko-fi.com/cdn/kofi1.png?v=3' border='0' alt='Buy Me a Coffee at ko-fi.com' /></a>
-- 💌 Share your success stories and feedback
-- 📢 Spread the word about the plugin
-- 🐛 [Report issues](https://github.com/wenlzhang/obsidian-folder-navigator/issues) to help improve the plugin
+```sh
+npm ci --ignore-scripts
+npm run dev          # unminified build with inline sourcemap into build/
+npm run lint
+npm test             # unit tests (node --test)
+npm run build        # typecheck + production build into build/
+npm run test:e2e     # build, then drive a temporary Obsidian instance
+```
 
-Thank you for being part of this journey! 🙏
+`test:e2e` needs Obsidian installed locally (set `OBSIDIAN_BIN` if it isn't in the default place). It uses a temporary vault and profile, so it doesn't touch your own, and it is skipped when Obsidian isn't found. CI doesn't run it; `npm version` does (through `preversion`), so run releases from a machine with Obsidian.
+
+Releasing: `npm version <x.y.z>` (or `x.y.z-rc.n` for a pre-release) updates `manifest.json`, `versions.json` and `CHANGELOG.md`, commits, tags and pushes. The tag triggers the release workflow, which builds, attests and creates a **draft** release to review and publish.
+
+How search scores and dedupes folders is specified by the tests in [`test/search.test.ts`](test/search.test.ts), next to the implementation in [`src/search.ts`](src/search.ts).
+
+## License
+
+Apache-2.0, see [LICENSE](LICENSE). Original work © 2025 wenlzhang; modifications © 2026 n0mu.

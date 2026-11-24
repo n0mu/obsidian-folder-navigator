@@ -1,0 +1,29 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      dev-dependencies:
+        dependency-type: development
+        update-types: [minor, patch]
+    ignore:
+      # TypeScript 7 is not supported by typescript-eslint yet.
+      - dependency-name: typescript
+        update-types: ["version-update:semver-major"]
+      # ESLint 10 waits for eslint-plugin-obsidianmd's bundled plugins.
+      - dependency-name: eslint
+        update-types: ["version-update:semver-major"]
+      # Node types follow the Node major in engines and CI (24).
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
