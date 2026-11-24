@@ -21,4 +21,12 @@ export default defineConfig([
             },
         },
     },
+    {
+        // Unit tests run under Node's built-in runner, not inside Obsidian.
+        files: ["test/**/*.ts"],
+        rules: {
+            "@typescript-eslint/no-floating-promises": "off", // node:test's test() returns a promise the runner tracks
+            "obsidianmd/no-nodejs-modules": "off",
+        },
+    },
 ]);

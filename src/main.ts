@@ -1,7 +1,8 @@
-import { Plugin } from "obsidian";
+import { Plugin, TFolder } from "obsidian";
 import { SettingsTab } from "./settingsTab";
-import { PluginSettings, DEFAULT_SETTINGS } from "./settings";
+import { type PluginSettings, parseSettings } from "./settings";
 import { FolderSuggestModal } from "./folderSuggestModal";
+import { deleteFromHistory, recordVisit, renameInHistory } from "./history";
 
 export default class FolderNavigatorPlugin extends Plugin {
     settings!: PluginSettings;
@@ -9,10 +10,8 @@ export default class FolderNavigatorPlugin extends Plugin {
     async onload() {
         await this.loadSettings();
 
-        // Add settings tab
         this.addSettingTab(new SettingsTab(this.app, this));
 
-        // Add folder navigation command
         this.addCommand({
             id: "open-folder-navigator",
             name: "Navigate to folder",
@@ -20,21 +19,52 @@ export default class FolderNavigatorPlugin extends Plugin {
                 new FolderSuggestModal(this.app, this).open();
             },
         });
-    }
 
-    onunload() {
-        // Cleanup when the plugin is disabled
+        // Keep visit history in sync with the vault so renamed folders keep
+        // their history and deleted ones don't linger in data.json.
+        this.registerEvent(
+            this.app.vault.on("rename", (file, oldPath) => {
+                if (
+                    file instanceof TFolder &&
+                    renameInHistory(
+                        this.settings.folderHistory,
+                        oldPath,
+                        file.path,
+                    )
+                ) {
+                    this.persistSettings();
+                }
+            }),
+        );
+        this.registerEvent(
+            this.app.vault.on("delete", (file) => {
+                if (
+                    file instanceof TFolder &&
+                    deleteFromHistory(this.settings.folderHistory, file.path)
+                ) {
+                    this.persistSettings();
+                }
+            }),
+        );
     }
 
     async loadSettings() {
-        this.settings = Object.assign(
-            {},
-            DEFAULT_SETTINGS,
-            await this.loadData(),
-        );
+        this.settings = parseSettings((await this.loadData()) as unknown);
     }
 
     async saveSettings() {
         await this.saveData(this.settings);
+    }
+
+    /** Fire-and-forget save that reports failures instead of dropping them. */
+    persistSettings(): void {
+        this.saveSettings().catch((error: unknown) => {
+            console.error("Folder Navigator: failed to save settings", error);
+        });
+    }
+
+    recordFolderVisit(folder: TFolder): void {
+        recordVisit(this.settings.folderHistory, folder.path, Date.now());
+        this.persistSettings();
     }
 }

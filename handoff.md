@@ -150,22 +150,22 @@ Files: `package.json`, `package-lock.json`, `.npmrc`, `esbuild.config.mjs`, `tsc
 
 Files: `manifest.json`, `versions.json`, `src/main.ts`, `src/settings.ts`, `src/folderSuggestModal.ts` (targeted edits only), `styles.css`.
 
-- [ ] SEC-1: `minAppVersion` per D2 + `versions.json`.
-- [ ] SEC-6: `parseSettings()` in `settings.ts` (pure, no obsidian runtime import); clone defaults; clamp `maxResults` 5–50, `recent/frequentFoldersToShow` 1–20; validate `folderDisplayMode`; sanitize history.
-- [ ] SEC-3: null-prototype history / `Object.hasOwn` everywhere it's read.
-- [ ] SEC-7: `registerEvent(vault.on("rename"|"delete"))` in `main.ts` to migrate/prune history (folders and their descendants: rename `a` → `b` must remap `a/x` → `b/x`); cap entries.
-- [ ] SEC-2: `validateFolderName()` + `normalizePath`; check `newFolderLocation` exists (`instanceof TFolder`) else root + Notice.
-- [ ] QUAL-2: `void`/await every promise (`saveSettings`, `handleCreateFolder`, `revealLeaf`).
+- [x] SEC-1: `minAppVersion` → **1.7.2** (D2 = a). `versions.json` is left as is: `version-bump.mjs` writes the 1.7.2 entry on the next `npm version`. Every past release already called `getAllFolders` (it's in the initial commit), so the old entries understate the real requirement; they weren't rewritten.
+- [x] SEC-6: `parseSettings()` in `settings.ts` (pure); fresh defaults per call via `defaultSettings()` (`DEFAULT_SETTINGS` constant removed); clamps; validates mode; sanitises history.
+- [x] SEC-3: `src/history.ts` holds null-prototype history and `getEntry()` uses `hasOwnProperty.call`. `Object.hasOwn` is avoided for older mobile WebViews.
+- [x] SEC-7: `vault.on("rename"|"delete")` in `main.ts` → `renameInHistory` / `deleteFromHistory` (descendants included; a rename onto an existing entry merges counts). Capped at `MAX_HISTORY_ENTRIES = 200` (least recently used dropped). Saves only when something changed.
+- [x] SEC-2: `src/paths.ts` `validateFolderName()` rejects empty names, segments starting with `.` (covers `.`/`..` and hidden folders), `\ : * ? " < > |` plus control characters, a trailing `.`, and Windows reserved names. `resolveCreateLocation()` falls back to the root with a Notice. `createFolderRecursive()` creates missing parents explicitly, so the `createFolder` nested-path question no longer matters.
+- [x] QUAL-2: modal promises (`saveSettings` via `plugin.persistSettings()`, `handleCreateFolder`, `revealLeaf` now awaited). The settings-tab ones (ST:226, 252) remain for S5.
 - [x] QUAL-5: no change needed. `commands/no-plugin-id-in-command-id` doesn't fire on `open-folder-navigator` (S1 baseline).
-- [ ] SEC-8: scope + prefix CSS; add the modal class.
-- [ ] Accept: lint errors from SEC/QUAL items above are gone; manual checks 1–6 in §6 pass.
+- [x] SEC-8: the modal gets the `folder-navigator-modal` class; all rules are scoped under it; classes are renamed `fn-separator`, `fn-create-*`, and `fn-highlighted` (the explorer highlight).
+- [ ] Accept: S2 lint errors are gone ✅ (97 → 80, see log). Manual checks 1–6 in §6 are **pending: not run in a real vault yet**.
 
 ### S3: Extract and test search; typed suggestion items
 
-Files: new `src/search.ts`, `src/search.test.ts`, `src/folderSuggestModal.ts`, `src/settings.ts`.
+Files: new `src/search.ts`, `test/search.test.ts`, `src/folderSuggestModal.ts`.
 
-- [ ] **First** write characterization tests against the current scoring/dedupe behaviour (copy the logic into `search.ts` verbatim, test it, *then* refactor). Cover: out-of-order keywords (`"bar foo"` matches `foo/bar/baz`), exact-name ranking, parent-over-child dedupe, child kept when it has more occurrences, create-option suppressed on exact path/name match, case-insensitivity, `validateFolderName` cases, `parseSettings` cases.
-- [ ] `enum FolderDisplayMode` → `as const` object + union type (required for Node type stripping); stored values (`"default"|"recency"|"frequency"`) unchanged.
+- [ ] **First** write characterization tests against the current scoring/dedupe behaviour (copy the logic into `search.ts` verbatim, test it, *then* refactor). Cover: out-of-order keywords (`"bar foo"` matches `foo/bar/baz`), exact-name ranking, parent-over-child dedupe, child kept when it has more occurrences, create-option suppressed on exact path/name match, case-insensitivity. (`validateFolderName`, `parseSettings` and history already have tests, written in S2.)
+- [x] `enum FolderDisplayMode` → `as const` object + union type. Done early in S2 so `settings.ts` could be tested.
 - [ ] Move to `SuggestModal<Item>` with the discriminated union (QUAL-3); separators only in the empty-query list (QUAL-7); unify recency/frequency; `renderMatches` with merged ranges.
 - [ ] Accept: `npm test` green; `no-tfile-tfolder-cast` gone; identical ordering for the same queries (spot-check against the old build in a test vault).
 
@@ -261,3 +261,27 @@ Files: `.github/workflows/*`, `.github/dependabot.yml`, `.github/FUNDING.yml`, `
 
   Not fired: `commands/no-plugin-id-in-command-id`, `object-assign`, `validate-manifest`, `validate-license`.
 - Next: S2. Settle D2 (`minAppVersion` 1.7.2 vs 1.13.0) first, because it decides how S5 handles the deprecations.
+
+### S2 - 2026-11-24 - branch `hardening`
+- Done: SEC-1, 2, 3, 6, 7, 8 and QUAL-2 (modal side), as ticked above. D2 decided: **1.7.2**.
+- New pure modules, each with no Obsidian runtime import:
+  - `src/history.ts`: create / get / record / rename / delete / prune / parse.
+  - `src/paths.ts`: `validateFolderName`.
+  - `src/settings.ts`: `defaultSettings` / `parseSettings`; `FolderDisplayMode` is now a const object plus a union type.
+  - Between pure modules, relative imports use the `.ts` extension (`allowImportingTsExtensions`), so Node can run them directly. Obsidian-facing files import without an extension; esbuild handles both.
+- Deviation, tests: they live in **`test/`**, not `src/`, with their own `test/tsconfig.json` (`types: ["node"]`). The root tsconfig has `types: []`, so plugin code can't silently use Node globals. Added `@types/node@24.19.2` (dev only).
+  - `npm test` = `node --test "test/**/*.test.ts"`: **20 tests pass**.
+  - `npm run typecheck` checks both projects.
+  - ESLint turns off `no-floating-promises` and `no-nodejs-modules` for `test/**` only.
+- tsconfig: `verbatimModuleSyntax` is on, so type-only imports must say `import type`. This also stops esbuild from keeping a runtime `main` ↔ `settingsTab` circular import.
+- `npm run format` now also formats `test/`. Prettier 3.10 re-wrapped some untouched lines in `folderSuggestModal.ts` and `settingsTab.ts` (formatting only).
+- Behaviour changes (intentional):
+  - Creating a folder now rejects bad names with a Notice instead of passing them to the vault.
+  - Nested names create missing parents.
+  - A missing default location falls back to the root.
+  - History follows renames and deletes and is capped at 200 entries.
+  - The `.suggestion-highlight` bold no longer leaks into other suggesters.
+- Lint: 97 → **80 problems (35 errors, 45 warnings)**. All remaining items are assigned to S3 (any-casts and separators, TFolder casts, unnecessary assertions), S4 (console.log, timers, `document`, `instanceof`) or S5 (style.display, settings-tab promises, deprecations, setting definitions).
+- Build: `build/main.js` 18.5 kB, still only `require("obsidian")`. `npm audit`: 0.
+- **Still not verified in a real vault**: §6 checks 1–6. Do this at the start of S3. In particular, confirm that renaming a visited folder keeps its "recent" position, and that the explorer highlight still shows (the class is now `fn-highlighted`).
+- Next: S3.

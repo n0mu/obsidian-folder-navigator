@@ -10,11 +10,11 @@
     },
     "scripts": {
         "dev": "node esbuild.config.mjs",
-        "build": "tsc --noEmit && node esbuild.config.mjs production",
-        "typecheck": "tsc --noEmit",
+        "build": "npm run typecheck && node esbuild.config.mjs production",
+        "typecheck": "tsc --noEmit && tsc --noEmit -p test",
         "lint": "eslint .",
-        "format": "prettier -w \"src/**/*.ts\"",
-        "test": "node --test \"src/**/*.test.ts\"",
+        "format": "prettier -w \"src/**/*.ts\" \"test/**/*.ts\"",
+        "test": "node --test \"test/**/*.test.ts\"",
         "preversion": "npm run lint && npm run test && npm run build",
         "version": "node version-bump.mjs && node version-changelog.mjs && git add manifest.json versions.json CHANGELOG.md",
         "postversion": "git push && git push --tags"
@@ -26,6 +26,7 @@
     "author": "wenlzhang",
     "license": "Apache-2.0",
     "devDependencies": {
+        "@types/node": "24.19.2",
         "esbuild": "0.28.2",
         "eslint": "9.39.5",
         "eslint-plugin-obsidianmd": "0.6.0",

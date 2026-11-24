@@ -1,10 +1,16 @@
-.nav-folder-title-highlighted {
+/* Folder briefly highlighted in the file explorer after navigating to it. */
+.nav-folder-title.fn-highlighted {
     background-color: var(--text-selection);
     border-radius: 4px;
     transition: background-color 0.3s ease;
 }
 
-.folder-separator {
+/* Everything below is scoped to this plugin's modal so other suggesters are unaffected. */
+.folder-navigator-modal .suggestion-highlight {
+    font-weight: bold;
+}
+
+.folder-navigator-modal .fn-separator {
     color: var(--text-muted);
     font-size: 0.85em;
     text-align: center;
@@ -15,22 +21,18 @@
     pointer-events: none;
 }
 
-.suggestion-highlight {
-    font-weight: bold;
-}
-
-.folder-create-option {
+.folder-navigator-modal .fn-create-option {
     display: flex;
     align-items: center;
     padding: 4px 0;
     color: var(--text-accent);
 }
 
-.folder-create-icon {
+.folder-navigator-modal .fn-create-icon {
     margin-right: 6px;
     font-size: 1.1em;
 }
 
-.folder-create-text {
+.folder-navigator-modal .fn-create-text {
     font-style: italic;
 }

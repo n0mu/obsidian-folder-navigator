@@ -8,8 +8,9 @@ import {
     FuzzySuggestModal,
     TFolder,
 } from "obsidian";
-import FolderNavigatorPlugin from "./main";
+import type FolderNavigatorPlugin from "./main";
 import { FolderDisplayMode } from "./settings";
+import { createHistory } from "./history";
 
 /**
  * Modal for searching and selecting a folder for new folder creation location
@@ -223,7 +224,8 @@ export class SettingsTab extends PluginSettingTab {
                             },
                         );
                         confirmButton.addEventListener("click", async () => {
-                            this.plugin.settings.folderHistory = {};
+                            this.plugin.settings.folderHistory =
+                                createHistory();
                             await this.plugin.saveSettings();
                             confirmModal.close();
                             new Notice("Folder history has been reset");

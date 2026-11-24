@@ -2,19 +2,21 @@ import {
     App,
     FuzzySuggestModal,
     TFolder,
-    WorkspaceLeaf,
     View,
-    FuzzyMatch,
+    type FuzzyMatch,
     Notice,
+    normalizePath,
 } from "obsidian";
 import type FolderNavigatorPlugin from "./main";
 import { FolderDisplayMode } from "./settings";
+import { getEntry } from "./history";
+import { validateFolderName } from "./paths";
 
 // Helper function for conditional logging based on plugin settings
 function log(
     message: string,
     plugin: FolderNavigatorPlugin,
-    ...args: any[]
+    ...args: unknown[]
 ): void {
     if (plugin.settings.debugMode) {
         console.log(message, ...args);
@@ -22,7 +24,7 @@ function log(
 }
 
 // Helper function for error logging (always show errors)
-function logError(message: string, ...args: any[]): void {
+function logError(message: string, ...args: unknown[]): void {
     console.error(message, ...args);
 }
 
@@ -68,6 +70,7 @@ export class FolderSuggestModal extends FuzzySuggestModal<TFolder> {
         super(app);
         this.plugin = plugin;
         this.setPlaceholder("Type folder name...");
+        this.modalEl.addClass("folder-navigator-modal");
         this.folders = this.getAllFolders();
         this.sortedFolders = this.getSortedFolders();
 
@@ -101,13 +104,15 @@ export class FolderSuggestModal extends FuzzySuggestModal<TFolder> {
             const recentLimit = this.plugin.settings.recentFoldersToShow;
 
             // Find folders with history and sort by last accessed timestamp (descending)
-            const foldersWithHistory = allFolders.filter(
-                (f) => folderHistory[f.path],
+            const foldersWithHistory = allFolders.filter((f) =>
+                getEntry(folderHistory, f.path),
             );
             const recentFolders = foldersWithHistory
                 .sort((a, b) => {
-                    const timeA = folderHistory[a.path]?.lastAccessed || 0;
-                    const timeB = folderHistory[b.path]?.lastAccessed || 0;
+                    const timeA =
+                        getEntry(folderHistory, a.path)?.lastAccessed ?? 0;
+                    const timeB =
+                        getEntry(folderHistory, b.path)?.lastAccessed ?? 0;
                     return timeB - timeA; // Descending order (newest first)
                 })
                 .slice(0, recentLimit);
@@ -154,13 +159,15 @@ export class FolderSuggestModal extends FuzzySuggestModal<TFolder> {
             const frequentLimit = this.plugin.settings.frequentFoldersToShow;
 
             // Find folders with history and sort by access count (descending)
-            const foldersWithHistory = allFolders.filter(
-                (f) => folderHistory[f.path],
+            const foldersWithHistory = allFolders.filter((f) =>
+                getEntry(folderHistory, f.path),
             );
             const frequentFolders = foldersWithHistory
                 .sort((a, b) => {
-                    const countA = folderHistory[a.path]?.accessCount || 0;
-                    const countB = folderHistory[b.path]?.accessCount || 0;
+                    const countA =
+                        getEntry(folderHistory, a.path)?.accessCount ?? 0;
+                    const countB =
+                        getEntry(folderHistory, b.path)?.accessCount ?? 0;
                     return countB - countA; // Descending order (most frequent first)
                 })
                 .slice(0, frequentLimit);
@@ -206,33 +213,6 @@ export class FolderSuggestModal extends FuzzySuggestModal<TFolder> {
 
         // Fallback to default sorting
         return allFolders;
-    }
-
-    /**
-     * Update folder access history when a folder is selected
-     */
-    private updateFolderHistory(folder: TFolder): void {
-        // Get current history or create new entry
-        const folderPath = folder.path;
-        const history = this.plugin.settings.folderHistory[folderPath] || {
-            lastAccessed: 0,
-            accessCount: 0,
-        };
-
-        // Update history data
-        history.lastAccessed = Date.now();
-        history.accessCount += 1;
-
-        // Save back to settings
-        this.plugin.settings.folderHistory[folderPath] = history;
-
-        // Save settings
-        this.plugin.saveSettings();
-
-        log(
-            `Updated folder history for "${folderPath}": ${JSON.stringify(history)}`,
-            this.plugin,
-        );
     }
 
     /**
@@ -568,49 +548,80 @@ export class FolderSuggestModal extends FuzzySuggestModal<TFolder> {
 
             return fileExplorer;
         } catch (error) {
-            logError(`Error accessing file explorer: ${error}`);
+            logError("Error accessing file explorer:", error);
             return null;
         }
     }
 
     /**
-     * Handle creating a new folder
+     * The configured base folder for new folders, or "" (vault root) if unset
+     * or if the configured folder no longer exists.
      */
-    private async handleCreateFolder(folderName: string): Promise<void> {
+    private resolveCreateLocation(): string {
+        const configured = this.plugin.settings.newFolderLocation.trim();
+        if (!configured) return "";
+        const path = normalizePath(configured);
+        if (path === "/") return "";
+        if (this.app.vault.getAbstractFileByPath(path) instanceof TFolder) {
+            return path;
+        }
+        new Notice(
+            `Default location "${path}" no longer exists; creating the folder in the vault root.`,
+        );
+        return "";
+    }
+
+    /** Create `path` and any missing parent folders. */
+    private async createFolderRecursive(path: string): Promise<TFolder> {
+        let folder = this.app.vault.getRoot();
+        let current = "";
+        for (const segment of path.split("/")) {
+            current = current ? `${current}/${segment}` : segment;
+            const existing = this.app.vault.getAbstractFileByPath(current);
+            if (existing instanceof TFolder) {
+                folder = existing;
+            } else if (existing) {
+                throw new Error(`"${current}" exists and is not a folder`);
+            } else {
+                folder = await this.app.vault.createFolder(current);
+            }
+        }
+        return folder;
+    }
+
+    /**
+     * Handle creating a new folder from the text typed in the modal
+     */
+    private async handleCreateFolder(input: string): Promise<void> {
+        const name = validateFolderName(input);
+        if (!name.ok) {
+            new Notice(`Can't create folder: ${name.reason}`);
+            return;
+        }
+
+        const base = this.resolveCreateLocation();
+        const fullPath = normalizePath(
+            base ? `${base}/${name.path}` : name.path,
+        );
+        log(`Creating new folder: "${fullPath}"`, this.plugin);
+
         try {
-            log(`Creating new folder: "${folderName}"`, this.plugin);
-
-            // Get the base path from settings
-            const basePath = this.plugin.settings.newFolderLocation;
-            const fullPath = basePath
-                ? `${basePath}/${folderName}`
-                : folderName;
-
-            log(`Full path for new folder: "${fullPath}"`, this.plugin);
-
-            // Check if folder already exists
-            const existingFolder =
-                this.app.vault.getAbstractFileByPath(fullPath);
-            if (existingFolder) {
+            if (this.app.vault.getAbstractFileByPath(fullPath)) {
                 new Notice(`Folder "${fullPath}" already exists`);
                 return;
             }
 
-            // Create the folder
-            const newFolder = await this.app.vault.createFolder(fullPath);
-            log(`Folder created successfully: "${fullPath}"`, this.plugin);
-
+            const newFolder = await this.createFolderRecursive(fullPath);
             new Notice(`Folder "${fullPath}" created successfully`);
 
-            // Close the modal
             this.close();
 
             // Navigate to the newly created folder
             setTimeout(() => {
-                this.navigateToFolder(newFolder);
+                void this.navigateToFolder(newFolder);
             }, 100);
         } catch (error) {
-            logError(`Error creating folder: ${error}`);
+            logError("Error creating folder:", error);
             new Notice(
                 `Failed to create folder: ${error instanceof Error ? error.message : String(error)}`,
             );
@@ -620,10 +631,9 @@ export class FolderSuggestModal extends FuzzySuggestModal<TFolder> {
     /**
      * Navigate to a folder (same logic as in onChooseItem)
      */
-    private navigateToFolder(folder: TFolder): void {
+    private async navigateToFolder(folder: TFolder): Promise<void> {
         try {
-            // Update folder history
-            this.updateFolderHistory(folder);
+            this.plugin.recordFolderVisit(folder);
 
             // Make sure the file explorer is visible
             const fileExplorerLeaves =
@@ -634,7 +644,7 @@ export class FolderSuggestModal extends FuzzySuggestModal<TFolder> {
             }
 
             const fileExplorerLeaf = fileExplorerLeaves[0];
-            this.app.workspace.revealLeaf(fileExplorerLeaf);
+            await this.app.workspace.revealLeaf(fileExplorerLeaf);
             log("File explorer leaf revealed", this.plugin);
 
             // Get the file explorer instance
@@ -694,7 +704,7 @@ export class FolderSuggestModal extends FuzzySuggestModal<TFolder> {
                 }
             }, 100);
         } catch (error) {
-            logError(`Error in folder navigation: ${error}`);
+            logError("Error in folder navigation:", error);
         }
     }
 
@@ -709,7 +719,9 @@ export class FolderSuggestModal extends FuzzySuggestModal<TFolder> {
 
         // Check if this is a create folder option
         if ((folder as CreateFolderOption)._isCreateOption) {
-            this.handleCreateFolder((folder as CreateFolderOption)._folderName);
+            void this.handleCreateFolder(
+                (folder as CreateFolderOption)._folderName,
+            );
             return;
         }
 
@@ -723,7 +735,7 @@ export class FolderSuggestModal extends FuzzySuggestModal<TFolder> {
 
         // Navigate to the selected folder
         setTimeout(() => {
-            this.navigateToFolder(folder);
+            void this.navigateToFolder(folder);
         }, 100);
     }
 
@@ -791,7 +803,7 @@ export class FolderSuggestModal extends FuzzySuggestModal<TFolder> {
                 this.plugin,
             );
         } catch (error) {
-            logError(`Error expanding folder: ${error}`);
+            logError("Error expanding folder:", error);
         }
     }
 
@@ -831,13 +843,11 @@ export class FolderSuggestModal extends FuzzySuggestModal<TFolder> {
                     });
 
                     // Add highlighting class
-                    titleElement.classList.add("nav-folder-title-highlighted");
+                    titleElement.classList.add("fn-highlighted");
 
                     // Remove after delay
                     setTimeout(() => {
-                        titleElement.classList.remove(
-                            "nav-folder-title-highlighted",
-                        );
+                        titleElement.classList.remove("fn-highlighted");
                     }, 2000);
 
                     return;
@@ -849,7 +859,7 @@ export class FolderSuggestModal extends FuzzySuggestModal<TFolder> {
                 this.plugin,
             );
         } catch (error) {
-            logError(`Error highlighting folder: ${error}`);
+            logError("Error highlighting folder:", error);
         }
     }
 
@@ -859,7 +869,7 @@ export class FolderSuggestModal extends FuzzySuggestModal<TFolder> {
         if ((item.item as any)._isSeparator) {
             el.empty();
             const separatorEl = el.createDiv({
-                cls: "folder-separator",
+                cls: "fn-separator",
             });
             separatorEl.setText((item.item as any)._separatorText);
             return;
@@ -869,14 +879,14 @@ export class FolderSuggestModal extends FuzzySuggestModal<TFolder> {
         if ((item.item as CreateFolderOption)._isCreateOption) {
             el.empty();
             const createEl = el.createDiv({
-                cls: "folder-create-option",
+                cls: "fn-create-option",
             });
             const iconEl = createEl.createSpan({
-                cls: "folder-create-icon",
+                cls: "fn-create-icon",
             });
             iconEl.setText("➕ ");
             const textEl = createEl.createSpan({
-                cls: "folder-create-text",
+                cls: "fn-create-text",
             });
             textEl.setText(
                 `Create new folder: "${(item.item as CreateFolderOption)._folderName}"`,
