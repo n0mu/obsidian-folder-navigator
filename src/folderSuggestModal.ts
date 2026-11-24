@@ -1,15 +1,15 @@
 import {
-    App,
-    FuzzySuggestModal,
-    TFolder,
-    View,
-    type FuzzyMatch,
+    type App,
     Notice,
+    SuggestModal,
+    TFolder,
+    type View,
     normalizePath,
+    renderMatches,
 } from "obsidian";
 import type FolderNavigatorPlugin from "./main";
 import { FolderDisplayMode } from "./settings";
-import { getEntry } from "./history";
+import { pinnedFolders, searchFolders, shouldOfferCreate } from "./search";
 import { validateFolderName } from "./paths";
 
 // Helper function for conditional logging based on plugin settings
@@ -50,446 +50,133 @@ interface ExtendedApp extends App {
     internalPlugins: InternalPlugins;
 }
 
-interface FolderWithScore {
-    folder: TFolder;
-    score: number;
-    match: FuzzyMatch<TFolder>;
+/** One row of the suggestion list. */
+type Item =
+    | { kind: "folder"; folder: TFolder; matches: Array<[number, number]> }
+    | { kind: "separator"; text: string }
+    | { kind: "create"; name: string };
+
+const PINNED_HEADINGS: Partial<Record<FolderDisplayMode, string>> = {
+    [FolderDisplayMode.RECENCY]: "— Recently visited folders —",
+    [FolderDisplayMode.FREQUENCY]: "— Frequently visited folders —",
+};
+
+function folderItem(folder: TFolder): Item {
+    return { kind: "folder", folder, matches: [] };
 }
 
-interface CreateFolderOption extends TFolder {
-    _isCreateOption: boolean;
-    _folderName: string;
-}
-
-export class FolderSuggestModal extends FuzzySuggestModal<TFolder> {
-    folders: TFolder[];
+export class FolderSuggestModal extends SuggestModal<Item> {
     plugin: FolderNavigatorPlugin;
-    sortedFolders: TFolder[] = [];
+    /** Pinned (recent/frequent) folders, if any, in display order. */
+    private pinned: TFolder[];
+    /** Every folder: pinned ones first, then the rest in vault order. */
+    private ordered: TFolder[];
+    private maxResults: number;
 
     constructor(app: App, plugin: FolderNavigatorPlugin) {
         super(app);
         this.plugin = plugin;
         this.setPlaceholder("Type folder name...");
         this.modalEl.addClass("folder-navigator-modal");
-        this.folders = this.getAllFolders();
-        this.sortedFolders = this.getSortedFolders();
+        // SuggestModal cuts the list to `limit` after getSuggestions, which
+        // would drop the "Create" row whenever there are maxResults hits.
+        // Limit here instead.
+        this.limit = 0;
+        this.maxResults = plugin.settings.maxResults;
 
-        // Use the max results from settings
-        this.limit = this.plugin.settings.maxResults;
+        const { settings } = plugin;
+        const all = app.vault.getAllFolders();
+        const mode = settings.folderDisplayMode;
+        this.pinned = pinnedFolders(
+            all,
+            settings.folderHistory,
+            mode,
+            mode === FolderDisplayMode.RECENCY
+                ? settings.recentFoldersToShow
+                : settings.frequentFoldersToShow,
+        );
+        const pinnedSet = new Set(this.pinned);
+        this.ordered = [
+            ...this.pinned,
+            ...all.filter((f) => !pinnedSet.has(f)),
+        ];
     }
 
-    private getAllFolders(): TFolder[] {
-        return this.app.vault.getAllFolders();
+    getSuggestions(query: string): Item[] {
+        if (query.trim().length === 0) return this.browseList();
+
+        // Ties keep `ordered`, so pinned folders win equal scores.
+        const hits = searchFolders(this.ordered, query, this.maxResults);
+        const items: Item[] = hits.map((h) => ({
+            kind: "folder",
+            folder: h.folder,
+            matches: h.matches,
+        }));
+        if (shouldOfferCreate(hits, query)) {
+            if (items.length > 0)
+                items.push({ kind: "separator", text: "—————" });
+            items.push({ kind: "create", name: query.trim() });
+        }
+        return items;
     }
 
     /**
-     * Sort folders based on the selected display mode in settings
+     * The list shown for an empty query: maxResults rows, headed by the
+     * pinned block (separators count as rows, as in v0.5.0).
      */
-    private getSortedFolders(): TFolder[] {
-        const allFolders = this.getAllFolders();
-        const displayMode = this.plugin.settings.folderDisplayMode;
-
-        log(`Sorting folders using display mode: ${displayMode}`, this.plugin);
-
-        // Default sorting (alphabetical by path)
-        if (displayMode === FolderDisplayMode.DEFAULT) {
-            return allFolders;
-        }
-
-        // Get folder history from settings
-        const folderHistory = this.plugin.settings.folderHistory;
-
-        if (displayMode === FolderDisplayMode.RECENCY) {
-            // Create a copy of all folders to sort
-            const recentLimit = this.plugin.settings.recentFoldersToShow;
-
-            // Find folders with history and sort by last accessed timestamp (descending)
-            const foldersWithHistory = allFolders.filter((f) =>
-                getEntry(folderHistory, f.path),
-            );
-            const recentFolders = foldersWithHistory
-                .sort((a, b) => {
-                    const timeA =
-                        getEntry(folderHistory, a.path)?.lastAccessed ?? 0;
-                    const timeB =
-                        getEntry(folderHistory, b.path)?.lastAccessed ?? 0;
-                    return timeB - timeA; // Descending order (newest first)
-                })
-                .slice(0, recentLimit);
-
-            // Get the remaining folders (those without history or beyond the limit)
-            const recentFolderPaths = new Set(recentFolders.map((f) => f.path));
-            const remainingFolders = allFolders.filter(
-                (f) => !recentFolderPaths.has(f.path),
-            );
-
-            log(
-                `Found ${recentFolders.length} recent folders to display`,
-                this.plugin,
-            );
-
-            // Only add separator if we have recent folders to show
-            if (recentFolders.length > 0) {
-                // Create a separator "folder" (not a real folder)
-                const separator = {} as TFolder;
-                (separator as any)._isSeparator = true;
-                (separator as any)._separatorText =
-                    "— Recently visited folders —";
-
-                // Create another separator for the remaining folders
-                const remainingSeparator = {} as TFolder;
-                (remainingSeparator as any)._isSeparator = true;
-                (remainingSeparator as any)._separatorText = "— All folders —";
-
-                // Combine recent folders with remaining folders with separators
-                return [
-                    separator,
-                    ...recentFolders,
-                    remainingSeparator,
-                    ...remainingFolders,
-                ];
-            }
-
-            // If no recent folders, just return all folders
-            return allFolders;
-        }
-
-        if (displayMode === FolderDisplayMode.FREQUENCY) {
-            // Create a copy of all folders to sort
-            const frequentLimit = this.plugin.settings.frequentFoldersToShow;
-
-            // Find folders with history and sort by access count (descending)
-            const foldersWithHistory = allFolders.filter((f) =>
-                getEntry(folderHistory, f.path),
-            );
-            const frequentFolders = foldersWithHistory
-                .sort((a, b) => {
-                    const countA =
-                        getEntry(folderHistory, a.path)?.accessCount ?? 0;
-                    const countB =
-                        getEntry(folderHistory, b.path)?.accessCount ?? 0;
-                    return countB - countA; // Descending order (most frequent first)
-                })
-                .slice(0, frequentLimit);
-
-            // Get the remaining folders (those without history or beyond the limit)
-            const frequentFolderPaths = new Set(
-                frequentFolders.map((f) => f.path),
-            );
-            const remainingFolders = allFolders.filter(
-                (f) => !frequentFolderPaths.has(f.path),
-            );
-
-            log(
-                `Found ${frequentFolders.length} frequent folders to display`,
-                this.plugin,
-            );
-
-            // Only add separator if we have frequent folders to show
-            if (frequentFolders.length > 0) {
-                // Create a separator "folder" (not a real folder)
-                const separator = {} as TFolder;
-                (separator as any)._isSeparator = true;
-                (separator as any)._separatorText =
-                    "— Frequently visited folders —";
-
-                // Create another separator for the remaining folders
-                const remainingSeparator = {} as TFolder;
-                (remainingSeparator as any)._isSeparator = true;
-                (remainingSeparator as any)._separatorText = "— All folders —";
-
-                // Combine frequent folders with remaining folders with separators
-                return [
-                    separator,
-                    ...frequentFolders,
-                    remainingSeparator,
-                    ...remainingFolders,
-                ];
-            }
-
-            // If no frequent folders, just return all folders
-            return allFolders;
-        }
-
-        // Fallback to default sorting
-        return allFolders;
+    private browseList(): Item[] {
+        const heading = PINNED_HEADINGS[this.plugin.settings.folderDisplayMode];
+        const rows: Item[] =
+            this.pinned.length === 0 || heading === undefined
+                ? this.ordered.map(folderItem)
+                : [
+                      { kind: "separator", text: heading },
+                      ...this.pinned.map(folderItem),
+                      { kind: "separator", text: "— All folders —" },
+                      ...this.ordered.slice(this.pinned.length).map(folderItem),
+                  ];
+        return rows.slice(0, this.maxResults);
     }
 
-    /**
-     * Custom search implementation with improved fuzzy matching
-     * Supports out-of-order keyword matching and better scoring
-     */
-    getSuggestions(query: string): FuzzyMatch<TFolder>[] {
-        // If no query, return all items (or recent/frequent items based on settings)
-        if (!query || query.trim().length === 0) {
-            return this.sortedFolders.map((folder) => ({
-                item: folder,
-                match: { score: 0, matches: [] },
-            }));
-        }
-
-        const normalizedQuery = query.toLowerCase().trim();
-
-        // Split query into keywords (space-separated)
-        const keywords = normalizedQuery
-            .split(/\s+/)
-            .filter((k) => k.length > 0);
-
-        log(
-            `Search query: "${query}", keywords: [${keywords.join(", ")}]`,
-            this.plugin,
-        );
-
-        // Score each folder
-        const foldersWithScore: FolderWithScore[] = [];
-
-        for (const folder of this.sortedFolders) {
-            // Skip separators
-            if ((folder as any)._isSeparator) {
-                foldersWithScore.push({
-                    folder,
-                    score: -1,
-                    match: { item: folder, match: { score: 0, matches: [] } },
+    renderSuggestion(item: Item, el: HTMLElement): void {
+        switch (item.kind) {
+            case "separator":
+                el.addClass("fn-separator-item");
+                el.createDiv({ cls: "fn-separator", text: item.text });
+                return;
+            case "create": {
+                const row = el.createDiv({ cls: "fn-create-option" });
+                row.createSpan({ cls: "fn-create-icon", text: "➕ " });
+                row.createSpan({
+                    cls: "fn-create-text",
+                    text: `Create new folder: "${item.name}"`,
                 });
-                continue;
+                return;
             }
-
-            const folderPath = folder.path.toLowerCase();
-            const folderName = folder.name.toLowerCase();
-            const originalPath = folder.path; // Keep original case for match positions
-
-            // Check if all keywords match (in any order)
-            let allKeywordsMatch = true;
-            let totalScore = 0;
-            const matchPositions: Array<[number, number]> = [];
-
-            for (const keyword of keywords) {
-                const pathIndex = folderPath.indexOf(keyword);
-                const nameIndex = folderName.indexOf(keyword);
-
-                if (pathIndex === -1) {
-                    // Keyword doesn't match this folder at all
-                    allKeywordsMatch = false;
-                    break;
-                }
-
-                // Store match positions for highlighting (using original path positions)
-                // Find ALL occurrences of this keyword in the original case-sensitive path
-                const originalPathLower = originalPath.toLowerCase();
-                let pos = 0;
-                while ((pos = originalPathLower.indexOf(keyword, pos)) !== -1) {
-                    // Record character positions for this occurrence
-                    for (let i = 0; i < keyword.length; i++) {
-                        matchPositions.push([pos + i, pos + i]);
-                    }
-                    pos += keyword.length; // Move past this occurrence to find the next one
-                }
-
-                // Calculate score for this keyword
-                let keywordScore = 0;
-
-                // Bonus for matching in folder name (not just path)
-                if (nameIndex !== -1) {
-                    keywordScore += 100;
-
-                    // Extra bonus for exact name match
-                    if (folderName === keyword) {
-                        keywordScore += 200;
-                    }
-                    // Bonus for name starting with keyword
-                    else if (nameIndex === 0) {
-                        keywordScore += 50;
-                    }
-                } else {
-                    // Match is in parent path, lower score
-                    keywordScore += 10;
-                }
-
-                // Bonus for match position (earlier is better)
-                keywordScore += Math.max(0, 50 - pathIndex);
-
-                totalScore += keywordScore;
-            }
-
-            if (allKeywordsMatch) {
-                // Additional scoring adjustments
-
-                // Penalize deeper nested folders
-                const depth = folder.path.split("/").length;
-                totalScore -= depth * 5;
-
-                // Bonus for shorter paths (more specific)
-                totalScore += Math.max(0, 100 - folder.path.length);
-
-                foldersWithScore.push({
-                    folder,
-                    score: totalScore,
-                    match: {
-                        item: folder,
-                        match: {
-                            score: totalScore,
-                            matches: matchPositions,
-                        },
-                    },
-                });
-            }
+            case "folder":
+                renderMatches(
+                    el.createDiv({ cls: "suggestion-content" }),
+                    item.folder.path,
+                    item.matches,
+                );
         }
-
-        // Sort by score (descending)
-        foldersWithScore.sort((a, b) => {
-            // Keep separators at their original positions
-            if (
-                (a.folder as any)._isSeparator ||
-                (b.folder as any)._isSeparator
-            ) {
-                return 0;
-            }
-            return b.score - a.score;
-        });
-
-        // Apply parent folder deduplication for Issue #4
-        // When a parent folder matches, completely exclude its children unless they have additional keyword matches
-        const results: FuzzyMatch<TFolder>[] = [];
-        const parentPaths = new Set<string>();
-
-        for (const item of foldersWithScore) {
-            // Always include separators
-            if ((item.folder as any)._isSeparator) {
-                results.push(item.match);
-                continue;
-            }
-
-            const folderPath = item.folder.path;
-
-            // Check if this folder's parent is already in results
-            let shouldExclude = false;
-            let isChildOfMatch = false;
-
-            for (const parentPath of parentPaths) {
-                // Check if current folder is a child of an already matched parent
-                if (folderPath.startsWith(parentPath + "/")) {
-                    isChildOfMatch = true;
-
-                    // Check if this child has additional keyword occurrences beyond the parent
-                    // Count total occurrences of all keywords in both parent and child
-                    const parentLower = parentPath.toLowerCase();
-                    const childLower = folderPath.toLowerCase();
-
-                    let parentOccurrences = 0;
-                    let childOccurrences = 0;
-
-                    for (const keyword of keywords) {
-                        // Count occurrences of this keyword in parent
-                        let pos = 0;
-                        while (
-                            (pos = parentLower.indexOf(keyword, pos)) !== -1
-                        ) {
-                            parentOccurrences++;
-                            pos += keyword.length;
-                        }
-
-                        // Count occurrences of this keyword in child
-                        pos = 0;
-                        while (
-                            (pos = childLower.indexOf(keyword, pos)) !== -1
-                        ) {
-                            childOccurrences++;
-                            pos += keyword.length;
-                        }
-                    }
-
-                    // If child doesn't have more keyword occurrences than parent, exclude it
-                    if (childOccurrences <= parentOccurrences) {
-                        shouldExclude = true;
-                    }
-                    break;
-                }
-            }
-
-            // Only include if not excluded
-            if (!shouldExclude) {
-                results.push(item.match);
-
-                // Add this folder to parent paths for future checks
-                if (!isChildOfMatch) {
-                    parentPaths.add(folderPath);
-                }
-            }
-        }
-
-        // Limit results
-        const limitedResults = results.slice(0, this.limit);
-
-        log(
-            `Found ${limitedResults.length} matching folders (filtered from ${foldersWithScore.length} total matches)`,
-            this.plugin,
-        );
-
-        // If query is provided, add "Create new folder" option at the end
-        if (normalizedQuery.length > 0) {
-            // Filter out separators to count real folder matches
-            const realFolderMatches = limitedResults.filter(
-                (result) => !(result.item as any)._isSeparator,
-            );
-
-            // Only show create option if the exact folder doesn't already exist
-            const exactMatch = realFolderMatches.some(
-                (result) =>
-                    result.item.path.toLowerCase() === normalizedQuery ||
-                    result.item.name.toLowerCase() === normalizedQuery,
-            );
-
-            if (!exactMatch) {
-                const createOption = {} as CreateFolderOption;
-                createOption._isCreateOption = true;
-                createOption._folderName = query.trim();
-
-                // Add separator before create option if there are results
-                if (limitedResults.length > 0) {
-                    const separator = {} as TFolder;
-                    (separator as any)._isSeparator = true;
-                    (separator as any)._separatorText = "—————";
-
-                    return [
-                        ...limitedResults,
-                        {
-                            item: separator,
-                            match: { score: 0, matches: [] },
-                        },
-                        {
-                            item: createOption as TFolder,
-                            match: { score: 0, matches: [] },
-                        },
-                    ];
-                } else {
-                    // No results, just show create option
-                    return [
-                        {
-                            item: createOption as TFolder,
-                            match: { score: 0, matches: [] },
-                        },
-                    ];
-                }
-            }
-        }
-
-        return limitedResults;
     }
 
-    getItems(): TFolder[] {
-        return this.sortedFolders;
+    /** Separators are headings: choosing one does nothing and keeps the modal open. */
+    selectSuggestion(item: Item, evt: MouseEvent | KeyboardEvent): void {
+        if (item.kind === "separator") return;
+        super.selectSuggestion(item, evt);
     }
 
-    getItemText(folder: TFolder): string {
-        // For separator folders (which will have a special property), return the separator text
-        if ((folder as any)._isSeparator) {
-            return (folder as any)._separatorText;
+    onChooseSuggestion(item: Item): void {
+        if (item.kind === "create") {
+            void this.handleCreateFolder(item.name);
+        } else if (item.kind === "folder") {
+            this.close();
+            setTimeout(() => {
+                void this.navigateToFolder(item.folder);
+            }, 100);
         }
-        // For create folder option
-        if ((folder as CreateFolderOption)._isCreateOption) {
-            return `Create new folder: ${(folder as CreateFolderOption)._folderName}`;
-        }
-        return folder.path;
     }
 
     /**
@@ -709,37 +396,6 @@ export class FolderSuggestModal extends FuzzySuggestModal<TFolder> {
     }
 
     /**
-     * Event handler for when a folder is chosen from the suggestion list
-     */
-    onChooseItem(folder: TFolder, evt: MouseEvent | KeyboardEvent): void {
-        // Check if this is a separator and ignore if so
-        if ((folder as any)._isSeparator) {
-            return;
-        }
-
-        // Check if this is a create folder option
-        if ((folder as CreateFolderOption)._isCreateOption) {
-            void this.handleCreateFolder(
-                (folder as CreateFolderOption)._folderName,
-            );
-            return;
-        }
-
-        log(
-            `Folder selected: "${folder.path}" (name: "${folder.name}")`,
-            this.plugin,
-        );
-
-        // Close the modal first
-        this.close();
-
-        // Navigate to the selected folder
-        setTimeout(() => {
-            void this.navigateToFolder(folder);
-        }, 100);
-    }
-
-    /**
      * Expand a folder by finding and clicking its title directly in the DOM
      */
     private expandFolderByDOMClick(folderName: string): void {
@@ -860,79 +516,6 @@ export class FolderSuggestModal extends FuzzySuggestModal<TFolder> {
             );
         } catch (error) {
             logError("Error highlighting folder:", error);
-        }
-    }
-
-    // Override the renderSuggestion method to customize how folders are displayed
-    renderSuggestion(item: FuzzyMatch<TFolder>, el: HTMLElement): void {
-        // Check if this is a separator
-        if ((item.item as any)._isSeparator) {
-            el.empty();
-            const separatorEl = el.createDiv({
-                cls: "fn-separator",
-            });
-            separatorEl.setText((item.item as any)._separatorText);
-            return;
-        }
-
-        // Check if this is a create folder option
-        if ((item.item as CreateFolderOption)._isCreateOption) {
-            el.empty();
-            const createEl = el.createDiv({
-                cls: "fn-create-option",
-            });
-            const iconEl = createEl.createSpan({
-                cls: "fn-create-icon",
-            });
-            iconEl.setText("➕ ");
-            const textEl = createEl.createSpan({
-                cls: "fn-create-text",
-            });
-            textEl.setText(
-                `Create new folder: "${(item.item as CreateFolderOption)._folderName}"`,
-            );
-            return;
-        }
-
-        // Custom rendering with keyword highlighting
-        el.empty();
-        const folder = item.item;
-        const folderPath = folder.path;
-
-        // Get match positions from the fuzzy match result
-        const matches = item.match?.matches || [];
-
-        if (matches.length === 0) {
-            // No matches, just display the text normally
-            el.setText(folderPath);
-            return;
-        }
-
-        // Sort matches by position
-        const sortedMatches = matches.slice().sort((a, b) => a[0] - b[0]);
-
-        // Build the highlighted text
-        let lastIndex = 0;
-        const textEl = el.createDiv({ cls: "suggestion-content" });
-
-        for (const match of sortedMatches) {
-            const [start, end] = match;
-
-            // Add text before the match
-            if (start > lastIndex) {
-                textEl.appendText(folderPath.substring(lastIndex, start));
-            }
-
-            // Add the matched text with highlighting
-            const matchEl = textEl.createSpan({ cls: "suggestion-highlight" });
-            matchEl.setText(folderPath.substring(start, end + 1));
-
-            lastIndex = end + 1;
-        }
-
-        // Add remaining text after the last match
-        if (lastIndex < folderPath.length) {
-            textEl.appendText(folderPath.substring(lastIndex));
         }
     }
 }

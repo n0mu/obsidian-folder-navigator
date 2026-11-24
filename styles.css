@@ -36,3 +36,8 @@
 .folder-navigator-modal .fn-create-text {
     font-style: italic;
 }
+
+/* Separator rows are headings, not choices. */
+.folder-navigator-modal .fn-separator-item {
+    cursor: default;
+}

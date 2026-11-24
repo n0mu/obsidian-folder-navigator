@@ -1,6 +1,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { createHistory, type FolderHistory } from "../src/history.ts";
 import {
+    countOccurrences,
+    mergeRanges,
+    pinnedFolders,
     searchFolders,
     shouldOfferCreate,
     type FolderLike,
@@ -120,12 +124,12 @@ test("create option is offered unless the query names a shown folder", () => {
     assert.equal(shouldOfferCreate(hits, "   "), false);
 });
 
-/** Character indices highlighted by a hit (ranges are inclusive in v0.5.0). */
+/** Character indices highlighted by a hit. */
 function highlighted(path: string, query: string): number[] {
     const [hit] = searchFolders(folders(path), query, 1);
     const set = new Set<number>();
     for (const [start, end] of hit?.matches ?? []) {
-        for (let i = start; i <= end; i++) set.add(i);
+        for (let i = start; i < end; i++) set.add(i);
     }
     return [...set].sort((a, b) => a - b);
 }
@@ -136,4 +140,82 @@ test("every occurrence of every keyword is highlighted", () => {
     // Overlapping keywords highlight the union.
     assert.deepEqual(highlighted("abcd", "abc bcd"), [0, 1, 2, 3]);
     assert.deepEqual(highlighted("zzz", "z"), [0, 1, 2]);
+});
+
+test("highlight ranges are merged, sorted and half-open", () => {
+    const [hit] = searchFolders(folders("abcd/zzz"), "z bcd abc", 1);
+    assert.deepEqual(hit?.matches, [
+        [0, 4],
+        [5, 8],
+    ]);
+});
+
+test("mergeRanges joins overlapping and touching ranges", () => {
+    assert.deepEqual(mergeRanges([]), []);
+    assert.deepEqual(
+        mergeRanges([
+            [5, 6],
+            [0, 2],
+            [1, 3],
+            [3, 4],
+            [8, 9],
+        ]),
+        [
+            [0, 4],
+            [5, 6],
+            [8, 9],
+        ],
+    );
+});
+
+test("countOccurrences counts non-overlapping matches", () => {
+    assert.equal(countOccurrences("abcabc", "abc"), 2);
+    assert.equal(countOccurrences("aaaa", "aa"), 2);
+    assert.equal(countOccurrences("abc", "x"), 0);
+});
+
+test("blank queries find nothing", () => {
+    assert.deepEqual(search(["a", "b"], "   "), []);
+});
+
+function history(
+    entries: Record<string, [lastAccessed: number, accessCount: number]>,
+): FolderHistory {
+    const h = createHistory();
+    for (const [path, [lastAccessed, accessCount]] of Object.entries(entries)) {
+        h[path] = { lastAccessed, accessCount };
+    }
+    return h;
+}
+
+function pinned(
+    mode: "default" | "recency" | "frequency",
+    limit: number,
+): string[] {
+    const all = folders("a", "b", "c", "d", "constructor");
+    const h = history({
+        b: [100, 1],
+        c: [300, 5],
+        d: [200, 5],
+        gone: [999, 9],
+    });
+    return pinnedFolders(all, h, mode, limit).map((f) => f.path);
+}
+
+test("recency mode pins the most recently visited folders", () => {
+    assert.deepEqual(pinned("recency", 5), ["c", "d", "b"]);
+    assert.deepEqual(pinned("recency", 2), ["c", "d"]);
+});
+
+test("frequency mode pins the most visited folders, ties in list order", () => {
+    assert.deepEqual(pinned("frequency", 5), ["c", "d", "b"]);
+    assert.deepEqual(pinned("frequency", 1), ["c"]);
+});
+
+test("default mode pins nothing; folders without history are never pinned", () => {
+    assert.deepEqual(pinned("default", 5), []);
+    // "constructor" is in the list but has no history entry; "gone" has
+    // history but is no longer in the vault.
+    assert.ok(!pinned("recency", 20).includes("constructor"));
+    assert.ok(!pinned("recency", 20).includes("gone"));
 });

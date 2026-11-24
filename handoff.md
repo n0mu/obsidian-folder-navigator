@@ -164,10 +164,10 @@ Files: `manifest.json`, `versions.json`, `src/main.ts`, `src/settings.ts`, `src/
 
 Files: new `src/search.ts`, `test/search.test.ts`, `src/folderSuggestModal.ts`.
 
-- [ ] **First** write characterization tests against the current scoring/dedupe behaviour (copy the logic into `search.ts` verbatim, test it, *then* refactor). Cover: out-of-order keywords (`"bar foo"` matches `foo/bar/baz`), exact-name ranking, parent-over-child dedupe, child kept when it has more occurrences, create-option suppressed on exact path/name match, case-insensitivity. (`validateFolderName`, `parseSettings` and history already have tests, written in S2.)
+- [x] **First** write characterization tests against the current scoring/dedupe behaviour (copy the logic into `search.ts` verbatim, test it, *then* refactor). Cover: out-of-order keywords (`"bar foo"` matches `foo/bar/baz`), exact-name ranking, parent-over-child dedupe, child kept when it has more occurrences, create-option suppressed on exact path/name match, case-insensitivity. (`validateFolderName`, `parseSettings` and history already have tests, written in S2.)
 - [x] `enum FolderDisplayMode` → `as const` object + union type. Done early in S2 so `settings.ts` could be tested.
-- [ ] Move to `SuggestModal<Item>` with the discriminated union (QUAL-3); separators only in the empty-query list (QUAL-7); unify recency/frequency; `renderMatches` with merged ranges.
-- [ ] Accept: `npm test` green; `no-tfile-tfolder-cast` gone; identical ordering for the same queries (spot-check against the old build in a test vault).
+- [x] Move to `SuggestModal<Item>` with the discriminated union (QUAL-3); separators only in the empty-query list (QUAL-7); unify recency/frequency; `renderMatches` with merged ranges.
+- [ ] Accept: `npm test` green ✅ (39 tests); `no-tfile-tfolder-cast` gone ✅; identical ordering for the same queries: pinned by score tests, but the **spot-check against the old build in a test vault is pending**.
 
 ### S4: Navigation and file explorer rewrite
 
@@ -285,3 +285,19 @@ Files: `.github/workflows/*`, `.github/dependabot.yml`, `.github/FUNDING.yml`, `
 - Build: `build/main.js` 18.5 kB, still only `require("obsidian")`. `npm audit`: 0.
 - **Still not verified in a real vault**: §6 checks 1–6. Do this at the start of S3. In particular, confirm that renaming a visited folder keeps its "recent" position, and that the explorer highlight still shows (the class is now `fn-highlighted`).
 - Next: S3.
+
+### S3 - 2026-11-24 - branch `hardening`
+- Done: all S3 items. Two commits: first the characterization (logic copied verbatim into `src/search.ts`, 12 tests pinning order, exact scores, dedupe, the create-option rule and highlighted characters), then the refactor with those tests unchanged apart from the range format.
+- `src/search.ts` (pure, imports only `history.ts` and `settings.ts`): `searchFolders`, `shouldOfferCreate`, `pinnedFolders` (one function for recency and frequency), `parseKeywords`, `countOccurrences`, `mergeRanges`. Highlight ranges are now merged, sorted, half-open `[start, end)`, which is what `renderMatches` takes.
+- `FolderSuggestModal` now extends `SuggestModal<Item>`, where `Item` is `folder | separator | create`. No fake `TFolder`s or `any` casts remain for list rows. The unused `folders` field, the double `getAllFolders()` call, `getItems` and `getItemText` are gone. 938 → 521 lines; the rest is navigation code for S4.
+- Confirmed in the Obsidian 1.15.1 bundle: `SuggestModal.updateSuggestions` slices the list to `limit` **after** `getSuggestions`, and `selectSuggestion` closes the modal before calling `onChooseSuggestion`.
+- Behaviour changes (intentional):
+  - QUAL-7: search results no longer contain the "Recently/Frequently visited" separators. Before, they took 2 of the `maxResults` slots and landed in arbitrary places. Ties still favour pinned folders, because search runs over pinned-first order.
+  - **New bug fixed:** the "Create new folder" row was cut off whenever a query matched `maxResults` or more folders, because of the `limit` slicing above. The modal now sets `limit = 0` and limits rows itself: maxResults hits plus the create row. The empty-query list is still cut to `maxResults` rows with separators counted, as before.
+  - Separators can't be chosen any more: `selectSuggestion` is overridden, so clicking a separator or pressing Enter on one does nothing. Before, it closed the modal. They also get `cursor: default` via the new `fn-separator-item` class.
+  - **New bug fixed:** overlapping keywords (e.g. `abc bcd` on `abcd`) used to render duplicated characters, because the per-character ranges overlapped. Merged ranges fix this.
+- New finding, not fixed (preserved and pinned by a test): dedupe compares only against **top-level** matched ancestors. A kept child does not hide its own children, so `abc/y/abc/z` is shown under `abc/y/abc` for the query `abc`. Change it only if you want different results.
+- Lint: 80 → **31 problems (11 errors, 20 warnings)**. Left for S4 (folderSuggestModal: console ×1, `any` ×2 in the explorer interfaces, window timers ×8, active doc ×2, instanceof ×3) and S5 (settingsTab: style.display ×8, misused promises ×2, deprecated ×4, setting definitions ×1). `npm run typecheck` is clean; `npm audit` is 0.
+- Build: `build/main.js` 17.2 kB, still only `require("obsidian")`.
+- **Still not verified in a real vault:** §6 checks 1–6 (carried over from S1 and S2), plus for S3: highlighting looks the same, separators are inert, the create row appears with many matches, and the empty-query list matches the old build in recency and frequency mode.
+- Next: S4.
