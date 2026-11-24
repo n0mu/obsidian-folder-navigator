@@ -4,7 +4,7 @@ import { PluginSettings, DEFAULT_SETTINGS } from "./settings";
 import { FolderSuggestModal } from "./folderSuggestModal";
 
 export default class FolderNavigatorPlugin extends Plugin {
-    settings: PluginSettings;
+    settings!: PluginSettings;
 
     async onload() {
         await this.loadSettings();

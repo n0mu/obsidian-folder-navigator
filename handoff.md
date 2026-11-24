@@ -114,6 +114,7 @@ Target devDependencies after S1: `esbuild`, `eslint`, `eslint-plugin-obsidianmd`
   - (b) Keep the ID and upstream the fixes as PRs. Then leave the manifest identity alone and split S1–S6 into upstreamable PRs.
   - Settle this before S6. S1–S5 don't depend on it.
 - **D2. `minAppVersion`.** (a) *Recommended:* **1.7.2**. It covers `getAllFolders` and Promise-returning `revealLeaf`, and loses nobody realistic. (b) **1.13.0** also unlocks `getSettingDefinitions()` and the built-in `SettingFolderControl` (folder picker with `includeRoot`), which deletes `FolderSelectionModal` and most of `settingsTab.ts`. Lint then warns `settings-tab/prefer-setting-definitions` unless you migrate. Choose (b) only if you're fine requiring 1.13+.
+  - *S1 update:* the baseline also flags `setDynamicTooltip` (×3) and `setWarning` as deprecated (`@typescript-eslint/no-deprecated`). The replacement, `setDestructive()`, is `@since 1.13.0`. With (a), S5 keeps both calls and adds an `eslint-disable-next-line` comment explaining the minAppVersion. With (b), they're replaced cleanly.
 - **D3. Debug mode.** *Recommended:* remove the setting and its logs (stale `debugMode` keys in `data.json` are ignored by `parseSettings`). The alternative is to keep it with `console.debug` only.
 - **D4. Expand-target behaviour.** `revealInFolder` already expands ancestors. `expandTargetFolder` additionally opens the target so its children show. Keep it as is (recommended).
 
@@ -125,13 +126,13 @@ Target devDependencies after S1: `esbuild`, `eslint`, `eslint-plugin-obsidianmd`
 
 Files: `package.json`, `package-lock.json`, `.npmrc`, `esbuild.config.mjs`, `tsconfig.json`, `.eslintrc*`, `.eslintignore`, `jest.config.js`, new `eslint.config.mjs`.
 
-- [ ] Remove `tslib`, jest trio + `jest.config.js`, `@eslint/js`, `eslint-config-standard`, `eslint-plugin-import|node|promise`, `builtin-modules`, `@types/node` (DEP-1,2,3,5,7).
-- [ ] Add/upgrade: `esbuild` (latest 0.2x), `typescript@5`, `eslint@9`, `typescript-eslint@^8.70`, `eslint-plugin-obsidianmd@0.6.x`, `obsidian@1.14.4` exact (DEP-3,4,6,7).
-- [ ] `.npmrc` hardening + `engines` (DEP-9). Delete `node_modules`, `npm install`, confirm `npm audit` = 0.
-- [ ] `esbuild.config.mjs`: `builtinModules` from `node:module`; drop `platform: 'node'`/`mainFields` (template default is browser platform + cjs); keep `minify: prod`, inline sourcemap in dev only.
-- [ ] `tsconfig.json`: drop `importHelpers`, `allowJs`, `inlineSources`; add `"noEmit": true`, `"strict": true` (fix only what blocks compile; real fixes come later), `"lib": ["DOM","ES2022"]`, `"module": "ESNext"`, `"moduleResolution": "bundler"`.
-- [ ] Scripts: `build` = `tsc --noEmit && node esbuild.config.mjs production` (still copies manifest/styles into `build/`), `lint` = `eslint .`, `typecheck`, `format` = prettier, `test` = `node --test "src/**/*.test.ts"` (no tests yet is OK). Remove `pretest` lint coupling and `gh release create` from `postversion` (CI-4).
-- [ ] `eslint.config.mjs` from the plugin README:
+- [x] Remove `tslib`, jest trio + `jest.config.js`, `@eslint/js`, `eslint-config-standard`, `eslint-plugin-import|node|promise`, `builtin-modules`, `@types/node` (DEP-1,2,3,5,7).
+- [x] Add/upgrade: `esbuild` (latest 0.2x), `typescript@5`, `eslint@9`, `typescript-eslint@^8.70`, `eslint-plugin-obsidianmd@0.6.x`, `obsidian@1.14.4` exact (DEP-3,4,6,7).
+- [x] `.npmrc` hardening + `engines` (DEP-9). Delete `node_modules`, `npm install`, confirm `npm audit` = 0.
+- [x] `esbuild.config.mjs`: `builtinModules` from `node:module`; drop `platform: 'node'`/`mainFields` (template default is browser platform + cjs); keep `minify: prod`, inline sourcemap in dev only.
+- [x] `tsconfig.json`: drop `importHelpers`, `allowJs`, `inlineSources`; add `"noEmit": true`, `"strict": true` (fix only what blocks compile; real fixes come later), `"lib": ["DOM","ES2022"]`, `"module": "ESNext"`, `"moduleResolution": "bundler"`.
+- [x] Scripts: `build` = `tsc --noEmit && node esbuild.config.mjs production` (still copies manifest/styles into `build/`), `lint` = `eslint .`, `typecheck`, `format` = prettier, `test` = `node --test "src/**/*.test.ts"` (no tests yet is OK). Remove `pretest` lint coupling and `gh release create` from `postversion` (CI-4).
+- [x] `eslint.config.mjs` from the plugin README:
   ```js
   import { defineConfig, globalIgnores } from "eslint/config";
   import obsidianmd from "eslint-plugin-obsidianmd";
@@ -142,8 +143,8 @@ Files: `package.json`, `package-lock.json`, `.npmrc`, `esbuild.config.mjs`, `tsc
   ]);
   ```
   Run eslint from the repo root (the config also lints `manifest.json`, `package.json`, `LICENSE`).
-- [ ] **Paste the full `npx eslint .` output into the Session log** as the baseline for S2–S5. Don't fix src yet.
-- [ ] Accept: `npm run build` produces `build/main.js` that loads in Obsidian and behaves identically; `npm audit` 0; lockfile ~< 200 packages.
+- [x] **Paste the `npx eslint .` baseline into the Session log** for S2–S5. Don't fix src yet.
+- [ ] Accept: `npm run build` produces `build/main.js` that **loads in Obsidian and behaves identically** (manual check still pending, see the S1 log); `npm audit` 0 ✅; 310 packages (the original ~200 target wasn't realistic, because `eslint-plugin-obsidianmd` alone pulls in ~250).
 
 ### S2: Correctness and safety fixes in place
 
@@ -155,7 +156,7 @@ Files: `manifest.json`, `versions.json`, `src/main.ts`, `src/settings.ts`, `src/
 - [ ] SEC-7: `registerEvent(vault.on("rename"|"delete"))` in `main.ts` to migrate/prune history (folders and their descendants: rename `a` → `b` must remap `a/x` → `b/x`); cap entries.
 - [ ] SEC-2: `validateFolderName()` + `normalizePath`; check `newFolderLocation` exists (`instanceof TFolder`) else root + Notice.
 - [ ] QUAL-2: `void`/await every promise (`saveSettings`, `handleCreateFolder`, `revealLeaf`).
-- [ ] QUAL-5: disable comment on the command ID.
+- [x] QUAL-5: no change needed. `commands/no-plugin-id-in-command-id` doesn't fire on `open-folder-navigator` (S1 baseline).
 - [ ] SEC-8: scope + prefix CSS; add the modal class.
 - [ ] Accept: lint errors from SEC/QUAL items above are gone; manual checks 1–6 in §6 pass.
 
@@ -226,3 +227,37 @@ Files: `.github/workflows/*`, `.github/dependabot.yml`, `.github/FUNDING.yml`, `
 - Confirmed from `obsidian@1.14.4` typings: `getAllFolders` @since 1.6.6, `revealLeaf(): Promise<void>` @since 1.7.2, `createFolder` throws if the folder exists, `renderMatches`/`normalizePath` exported, `getSettingDefinitions` + `SettingFolderControl` @since 1.13.0.
 - Community directory: "Health: Good / Review: Caution". The specific findings are only visible in the developer dashboard; §1 is inferred from the `eslint-plugin-obsidianmd` rules and the code.
 - Not yet verified (do it in the named session): that the explorer uses the `data-path` attribute (S4), and how `vault.createFolder` handles `..` and nested paths (S2).
+
+### S1 - 2026-11-24 - branch `hardening`
+- Done: all S1 tooling items. devDependencies went from 18 to 7 and runtime dependencies from 1 to 0. The lockfile went from 525 packages to 310, and `npm audit` from 12 vulns to **0**.
+  - Pinned exact versions, each published ≥ 7 days before install: esbuild 0.28.2, typescript 6.0.3 (TS 7 is unsupported by typescript-eslint), eslint 9.39.5, typescript-eslint 8.73.0, eslint-plugin-obsidianmd 0.6.0, obsidian 1.14.4, prettier 3.10.1.
+  - ESLint 9 now prints "no longer supported" on install. ESLint 10 is blocked until `eslint-plugin-obsidianmd`'s bundled plugins declare support (per its README). Revisit when the plugin updates.
+  - `overrides` in package.json: `@microsoft/eslint-plugin-sdl` pins `eslint-plugin-n@17.10.3`, which pulls vulnerable `minimatch@9` (GHSA-g3hv-75wg-m249). It's overridden to `17.24.0` (same major, no minimatch dependency). `@typescript-eslint/utils` is overridden to 8.73.0 to dedupe with typescript-eslint. **Remove both overrides when the plugin or sdl update.**
+  - `package.json` now has `"type": "module"`, `"private": true`, `"license"`, and `engines.node >=24`. `.npmrc` has `ignore-scripts`, `save-exact` and `engine-strict`. The build works with install scripts disabled, using esbuild's platform package.
+  - `tsconfig.json`: `strict`, `noEmit`, `moduleResolution: bundler`. There were 5 strict-mode compile errors; I fixed them minimally without changing behaviour (`settings!`, optional settings-tab element refs, `unknown` error narrowing in `handleCreateFolder`).
+  - `build`: `tsc --noEmit` then esbuild. Prettier no longer runs in the build. `postversion` no longer creates a GitHub release locally (CI-4 done early).
+- **Not verified:** loading `build/main.js` (14.9 kB, only `require("obsidian")`) in a real vault. Run §6 checks 1–3 before or at the start of S2.
+- Lint baseline: `npx eslint .` reports **97 problems (48 errors, 49 warnings)**, all in `src/`. `manifest.json`, `package.json` and `LICENSE` pass. Line numbers refer to the S1 commit. FSM = `folderSuggestModal.ts`, ST = `settingsTab.ts`.
+
+  | Count | Rule | Sev | Where | Session |
+  |---|---|---|---|---|
+  | 2 | obsidianmd/no-unsupported-api (`getAllFolders` needs 1.6.6) | E | FSM:79, ST:33 | S2 |
+  | 8 | obsidianmd/no-static-styles-assignment | E | ST:73–88 | S5 |
+  | 3 | @typescript-eslint/no-floating-promises | E | FSM:230 (saveSettings), 637 (revealLeaf), 712 (handleCreateFolder) | S2 |
+  | 2 | obsidianmd/no-misused-promises (async click/onSelect callbacks) | E | ST:225, 251 | S5 |
+  | 1 | obsidianmd/rule-custom-message → **no-console** (`console.log` in `log()`) | E | FSM:20 | S4 |
+  | 20+1+3 | no-unsafe-member-access / no-unsafe-return / no-unsafe-argument (`any` casts for separators, `log(...args: any[])`) | E | FSM, many | S3 / S4 |
+  | 2 | no-unnecessary-type-assertion | E | FSM:480, 488 | S3 |
+  | 5 | restrict-template-expressions (`${error}` with `unknown`) | E | FSM:571, 613, 697, 794, 852 | S2/S4 |
+  | 1 | no-unsafe-assignment (`loadData()` result) | E | main:30 | S2 (`parseSettings`) |
+  | 24 | no-explicit-any | W | FSM, many | S3 / S4 |
+  | 5 | obsidianmd/no-tfile-tfolder-cast | W | FSM:129, 135, 184, 190, 469 | S3 |
+  | 8 | obsidianmd/prefer-window-timers | W | FSM:609–837 | S4 |
+  | 2 | obsidianmd/prefer-active-doc | W | FSM:738, 809 | S4 |
+  | 3 | obsidianmd/prefer-instanceof | W | FSM:752, 762, 823 | S4 |
+  | 4 | no-deprecated (`setDynamicTooltip` ×3, `setWarning`; replacements need 1.13, see D2) | W | ST:143, 161, 176, 193 | S5 |
+  | 1 | settings-tab/prefer-setting-definitions | W | ST:45 | S5 (D2) |
+  | 2 | no-unused-vars (`WorkspaceLeaf`, `App`) | W | FSM:5, settings:1 | S2 |
+
+  Not fired: `commands/no-plugin-id-in-command-id`, `object-assign`, `validate-manifest`, `validate-license`.
+- Next: S2. Settle D2 (`minAppVersion` 1.7.2 vs 1.13.0) first, because it decides how S5 handles the deprecations.

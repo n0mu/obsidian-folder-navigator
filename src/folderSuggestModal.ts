@@ -611,7 +611,9 @@ export class FolderSuggestModal extends FuzzySuggestModal<TFolder> {
             }, 100);
         } catch (error) {
             logError(`Error creating folder: ${error}`);
-            new Notice(`Failed to create folder: ${error.message || error}`);
+            new Notice(
+                `Failed to create folder: ${error instanceof Error ? error.message : String(error)}`,
+            );
         }
     }
 

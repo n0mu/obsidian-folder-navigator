@@ -46,9 +46,9 @@ export class SettingsTab extends PluginSettingTab {
     plugin: FolderNavigatorPlugin;
 
     // Keep track of settings elements for dynamic updates
-    recentFoldersSettingEl: HTMLElement;
-    frequentFoldersSettingEl: HTMLElement;
-    resetHistorySettingEl: HTMLElement;
+    recentFoldersSettingEl?: HTMLElement;
+    frequentFoldersSettingEl?: HTMLElement;
+    resetHistorySettingEl?: HTMLElement;
 
     constructor(app: App, plugin: FolderNavigatorPlugin) {
         super(app, plugin);
