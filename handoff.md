@@ -1,6 +1,6 @@
 # Folder Navigator: security audit and hardening plan
 
-Status: **S1–S6 done on branch `hardening`; S6 release acceptance (CI run + attested pre-release) pending a push**. Audited at commit `4175b9d` (v0.5.0) on 2026-11-24.
+Status: **S1–S6 done on branch `hardening` (pushed, CI green). The plugin is for local use only: no release is cut and nothing is submitted to Obsidian.** Audited at commit `4175b9d` (v0.5.0) on 2026-11-24.
 
 ## How to use this file
 
@@ -197,7 +197,7 @@ Files: `.github/workflows/*`, `.github/dependabot.yml`, `.github/FUNDING.yml`, `
 - [x] CI-1…7 as listed. Release workflow: `npm ci --ignore-scripts` → `npm run lint && npm run typecheck && npm test && npm run build` → attest → draft release with `build/main.js`, `build/manifest.json`, `build/styles.css`.
 - [x] D1 identity changes; README: fork notice, what changed vs upstream, privacy note (history stored in `data.json`, no network access), remove stale `docs/implementation/SEARCH_IMPROVEMENTS.md` or update it to point at `search.ts` tests.
 - [x] `validate-manifest` / `validate-license` lint clean.
-- [ ] Accept (needs a push, see the S6 log): tag a pre-release in the fork; workflow green; `gh attestation verify build/main.js --repo n0mu/obsidian-folder-navigator` succeeds; (if you have dashboard access) preview scan passes.
+- [x] Accept, partly: workflow green ✅ (CI on push). **Not done, by decision** (local use only, see the S6 log): tag a pre-release in the fork; workflow green; `gh attestation verify build/main.js --repo n0mu/obsidian-folder-navigator` succeeds; (if you have dashboard access) preview scan passes.
 
 ---
 
@@ -405,7 +405,8 @@ Every item below is covered by `e2e/plugin.e2e.ts`. The suite runs in a separate
   - `docs/implementation/SEARCH_IMPROVEMENTS.md` was deleted: its code was stale and it described debug logging. The README points to `test/search.test.ts`.
 - Verified locally: `npx eslint .` reports 0 problems (`validate-manifest` and `validate-license` included), typecheck is clean, 39 unit tests and **32/32 e2e tests pass with the new ID**, `npm audit` is 0, and `build/main.js` is 14.6 kB. The changelog and bump scripts were exercised in a scratch clone: rc notes without tags, a stable section, the duplicate guard, and the rc being skipped in `versions.json`.
 - Not verified: the workflows themselves, because nothing has been pushed. actionlint and zizmor aren't installed; the YAML parses.
-- **Still open (accept):** push `hardening`, check that `ci.yml` is green, then cut a pre-release from this branch:
+- Pushed `hardening`. **`ci.yml` is green on GitHub** (run 45402332029, commit `29659b2`): install with scripts off, lint, unit tests, typecheck + build, and audit all pass on ubuntu with Node 24.
+- **Decision: local use only.** The owner doesn't want a release or a submission to Obsidian, so no tag was pushed and the release workflow has never run. Install by copying `build/` into `<vault>/.obsidian/plugins/folder-navigator-hardened/`. If a release is ever wanted, these are the steps:
   1. `npm version 0.6.0-rc.1`. This runs lint, unit tests and e2e, commits, tags and pushes.
   2. Check that the release workflow is green and the draft pre-release has 3 assets.
   3. `gh release download 0.6.0-rc.1 -p main.js -D /tmp/rc && gh attestation verify /tmp/rc/main.js --repo n0mu/obsidian-folder-navigator`.
